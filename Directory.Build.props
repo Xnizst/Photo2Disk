@@ -1,0 +1,13 @@
+<Project>
+  <!--
+    專案放在 Google 雲端同步的資料夾（桌機 E 槽、筆電 G 槽），
+    把 bin、obj 移到本機 %LOCALAPPDATA%\Photo2Disk_build\，
+    避免每次建置都上傳數百 MB 的建置產物、兩台電腦的建置檔互相覆蓋。
+    發佈檔（publish\）仍放在專案資料夾內，兩台電腦共用。
+  -->
+  <PropertyGroup>
+    <P2DBuildRoot>$(LOCALAPPDATA)\Photo2Disk_build\$(MSBuildProjectName)\</P2DBuildRoot>
+    <BaseIntermediateOutputPath>$(P2DBuildRoot)obj\</BaseIntermediateOutputPath>
+    <BaseOutputPath>$(P2DBuildRoot)bin\</BaseOutputPath>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Photo2Disk.UiTest</RootNamespace>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\Photo2Disk\*.cs" Exclude="..\..\Photo2Disk\Program.cs" Link="App\%(Filename)%(Extension)" />
+    <Compile Include="..\Shared\FakeReleaseServer.cs" Link="Shared\FakeReleaseServer.cs" />
+  </ItemGroup>
+
+</Project>

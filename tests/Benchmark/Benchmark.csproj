@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>Photo2Disk.Benchmark</RootNamespace>
+    <Optimize>true</Optimize>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\Photo2Disk\DedupEngine.cs" Link="Engine\DedupEngine.cs" />
+    <Compile Include="..\..\Photo2Disk\HashIndex.cs" Link="Engine\HashIndex.cs" />
+    <Compile Include="..\..\Photo2Disk\ImportHistory.cs" Link="Engine\ImportHistory.cs" />
+  </ItemGroup>
+
+</Project>
