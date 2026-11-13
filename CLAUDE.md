@@ -28,7 +28,7 @@
 - 發佈：在 `Photo2Disk\` 執行 `dotnet publish -c Release -o ..\publish`，產出 `publish\照片備份過濾工具.exe`（自包含單一 exe，約 70 MB）。
 - 發佈新版給同學（自動更新）：改 `<Version>` → 專案根目錄執行 `python tools/make_release.py`，產出 `release\v<版本>\Photo2Disk.exe` 與 `.sha256` → 建立 Release（Tag `v<版本>`，說明欄寫更新內容）上傳這兩個檔案：桌機已裝 `gh` 並登入 Xnizst（2026-11-13），可用 `"C:\Program Files\GitHub CLI\gh.exe" release create v<版本> release/v<版本>/Photo2Disk.exe release/v<版本>/Photo2Disk.exe.sha256 --repo Xnizst/Photo2Disk --title v<版本> --notes "…"`；筆電沒有 `gh` 時用網頁建立。附件用英文檔名，因為 GitHub 會改寫非英文檔名；更新時沿用使用者電腦上原本的檔名。不要勾 pre-release（程式會略過），也不要漏掉 `.sha256`（沒有就不提示更新）。
 - 版本號只寫在 `Photo2Disk.csproj` 的 `<Version>`。
-- 介面改版（YAN 2026-11-13，參考 GPT 產生的設計稿，1.3.0）：YAN 選定改用設計稿的亮藍色系（`Theme.Accent` #0B6BD8，取代原本石板藍＋藍綠，這是本專案特例，其他工具仍照 Windows 桌面規則的配色），淺灰藍視窗底、白色圓角卡片；標題區有程式圖示與「照片只在本機處理」標示；備份位置與來源資料左右並排（步驟 1、2）；統計數字卡＋分頁＋搜尋；表格每列勾選框（預設全勾，`SourceItem.Excluded`，複製時略過未勾選）；狀態用膠囊標籤；最下方狀態列。YAN 選擇不顯示縮圖（zip 要解壓、HEIC 需要解碼器、數千張會拖慢）。視窗高度不到 700（96 DPI 換算）時收起數字卡（`UpdateCompactLayout`，最小化時不動）。設計稿與漏斗圖示原檔在專案根目錄（`GPT介面設計參考.png`、`photo-backup-filter-icon-light.png`），不進 git。
+- 介面改版（YAN 2026-11-13，參考 GPT 產生的設計稿，1.3.0）：YAN 選定改用設計稿的亮藍色系（`Theme.Accent` #0B6BD8，取代原本石板藍＋藍綠，這是本專案特例，其他工具仍照 Windows 桌面規則的配色），淺灰藍視窗底、白色圓角卡片；標題區有程式圖示與「照片只在本機處理」標示；備份位置與來源資料左右並排（步驟 1、2）；統計數字卡＋分頁＋搜尋；表格每列勾選框（預設全勾，`SourceItem.Excluded`，複製時略過未勾選）；狀態用膠囊標籤；最下方狀態列。YAN 選擇不顯示縮圖（zip 要解壓、HEIC 需要解碼器、數千張會拖慢）。按鈕全部是自繪圓角（`RoundButton`，YAN 要求「按鈕都要圓潤」）。來源資料的「＋ 加入」放在卡片標題列右側（`SectionPanel.HeaderAction`），兩張卡片高度才對齊。視窗矮時分級收合（`UpdateCompactLayout`，最小化時不動）：高度不到 700（96 DPI 換算）收起數字卡；不到 620 再收起標題區、備份位置說明，來源清單縮成一列、卡片標題列壓低、表格列高 28。表格固定欄寬與列高不會自動跟 DPI 放大，`ApplyGridMetrics` 在載入與 `OnDpiChanged` 時從 96 DPI 基準換算；分頁放不下時自動縮小間距，搜尋欄最多佔四分之一寬。設計稿與漏斗圖示原檔在專案根目錄（`GPT介面設計參考.png`、`photo-backup-filter-icon-light.png`），不進 git。
 - 程式圖示：1.3.0 起改用 GPT 產生的漏斗圖示（YAN 選定），`python tools/make_icon.py --from tools/icon_source.png` 清掉幾乎透明的雜點、裁切置中後產生 `Photo2Disk/app.ico`。1.2.1 的自繪圖示（`make_icon.py A`）保留在腳本裡。產生 `Photo2Disk/app.ico`（16～256 像素），csproj 的 `ApplicationIcon` 給 exe 用，同一檔案以 `EmbeddedResource`（`Photo2Disk.app.ico`）給視窗標題列用（`Ui.AppIcon`）。`--preview` 產生比較圖 `tools/icon_preview.png`。
 
 ## 架構
@@ -63,7 +63,7 @@
 
 - **Google 網頁版下載的檔案是否與硬碟裡先前下載的同一張照片逐位元相同**。這是整個比對方式的前提，需要用真實帳號下載同一張照片兩次比對雜湊。若不同（例如 Google 每次下載都改寫中繼資料），要改用拍攝時間＋影像內容比對。
 - 在 Google 相簿裡編輯、旋轉過的照片，下載內容與原檔不同，會被當成新照片。
-- 版面實測過 125%（1246×938、1020×788）與 100%（桌機 1000×760，含檔名規則視窗）；150%、1366×768 尚未測試。
+- 1.3.0 版面 2026-11-13 實測（桌機第二台直向螢幕暫時改縮放，`P2D_UITEST_SCREEN=2` 讓 UiTest 開在那台，寬高參數用 96 DPI 單位）：125%（864×576、864×1000）、150%（720×480、720×900）、主螢幕 1920×1080 開 150% 最大化（表格 4 列），全部功能測試通過，含檔名規則視窗與更新提示列。已知限制：1366×768 開 150%（480 高，非 Windows 預設）時表格一次只看得到 1 列，要捲動；檔名規則視窗約 750 寬，比 720 寬的直向螢幕寬（橫向筆電不會發生）。
 - 2026-11-13 網路資料查證：
   - 拍攝日期讀取已用 metadata-extractor 專案的真實樣本（GitHub drewnoakes/metadata-extractor-images）驗證 20 個檔案：iPhone 6／8／XR／11 Pro 的 JPEG、HEIC（含 EXIF 放在檔尾的 HEIC），Pixel 2、OnePlus 8、Samsung Note 8、Galaxy S10（HEIC）、Sony 的照片，iPhone 的 MOV，Nokia 6.1、Sony 相機的 MP4。日期與機型全部和 metadata-extractor 的標準答案一致。樣本檔授權未確認，所以沒有放進專案，要重驗時用 `tests\MetaProbe` 重新下載比對。
   - 同時發現 iPhone MOV 的 mvhd 不可靠：一個樣本的 mvhd 是 2019-11-04，Apple 的 `com.apple.quicktime.creationdate` 卻是 2018-04-06（可能是編輯或轉存時間）。已改成優先讀 Apple 欄位（拍攝地當地時間，和照片 EXIF 同義，並讀機型）。依 Apple 文件，mvhd 規定存 UTC；Android 與相機的 MP4 沒有 Apple 欄位，仍用 mvhd 換算成這台電腦的時區，國外拍的影片可能差幾小時。

@@ -23,11 +23,25 @@ internal static class UiTestProgram
         ApplicationConfiguration.Initialize();
         MainForm.AutoCheckUpdates = false; // 不連真正的 GitHub
         var form = new MainForm();
+        // 環境變數 P2D_UITEST_SCREEN=2：視窗開在非主要螢幕（用來測不同縮放）；寬高參數改用 96 DPI 單位，
+        // 並放寬最小尺寸（程式在小螢幕上本來就會把最小尺寸縮到工作區大小）。
+        var otherScreen = Environment.GetEnvironmentVariable("P2D_UITEST_SCREEN") == "2"
+            ? Screen.AllScreens.FirstOrDefault(sc => !sc.Primary)
+            : null;
+        Origin = (otherScreen?.WorkingArea.Location ?? Point.Empty) + new Size(20, 20);
+        Size? dipSize = null;
         if (args.Length >= 3)
         {
             form.StartPosition = FormStartPosition.Manual;
-            form.Location = new Point(20, 20);
-            form.Size = new Size(int.Parse(args[1]), int.Parse(args[2]));
+            form.Location = Origin;
+            if (otherScreen is null)
+            {
+                form.Size = new Size(int.Parse(args[1]), int.Parse(args[2]));
+            }
+            else
+            {
+                dipSize = new Size(int.Parse(args[1]), int.Parse(args[2]));
+            }
         }
         var exitCode = 0;
         form.Shown += async (_, _) =>
@@ -35,6 +49,14 @@ internal static class UiTestProgram
             try
             {
                 form.TopMost = true;
+                if (dipSize is { } ds)
+                {
+                    form.WindowState = FormWindowState.Normal;
+                    form.MinimumSize = Size.Empty;
+                    var k = form.DeviceDpi / 96.0;
+                    form.Size = new Size((int)(ds.Width * k), (int)(ds.Height * k));
+                    await Settle();
+                }
 
                 // 「加入…」視窗結果的判斷：選檔案 → 檔案；檔名欄維持預設文字 → 所在資料夾；不存在 → 忽略
                 var zipFile = sources[0];
@@ -117,7 +139,7 @@ internal static class UiTestProgram
                 await Settle();
                 Shot(form, Path.Combine(outDir, "4_複製完成.png"));
                 var copied = Directory.EnumerateFiles(Path.Combine(backup, DedupEngine.StagingFolderName), "*", SearchOption.AllDirectories).Count();
-                log.Add($"dpi={form.DeviceDpi} size={form.Size} copied={copied}");
+                log.Add($"dpi={form.DeviceDpi} size={form.Size} compact={form.CompactLevel} copied={copied}");
                 if (copied != 3)
                 {
                     exitCode = 1;
@@ -168,7 +190,7 @@ internal static class UiTestProgram
                     using var dlg = new NamingDialog(opts)
                     {
                         StartPosition = FormStartPosition.Manual,
-                        Location = new Point(40, 40),
+                        Location = Origin + new Size(20, 20),
                         TopMost = true,
                     };
                     dlg.Show(form);
@@ -182,7 +204,7 @@ internal static class UiTestProgram
                 // 拖動排序：拍攝日期、原檔名 → 把「原檔名」拖到最上面；再點一下勾選「流水號」
                 var dragOpts = new NamingOptions();
                 dragOpts.Apply(NamingOptions.Presets[0]);
-                using (var dlg = new NamingDialog(dragOpts) { StartPosition = FormStartPosition.Manual, Location = new Point(40, 40), TopMost = true })
+                using (var dlg = new NamingDialog(dragOpts) { StartPosition = FormStartPosition.Manual, Location = Origin + new Size(20, 20), TopMost = true })
                 {
                     dlg.Show(form);
                     await Settle();
@@ -261,6 +283,8 @@ internal static class UiTestProgram
         }
         return exitCode;
     }
+
+    private static Point Origin = new(20, 20);
 
     private static async Task Settle()
     {

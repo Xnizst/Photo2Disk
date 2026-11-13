@@ -15,7 +15,7 @@ public sealed class MainForm : Form
     private readonly SourceList lstSources;
     private readonly SectionPanel sourcesCard;
     private readonly Button btnBrowseBackup = Ui.MakeButton("選擇資料夾…", false);
-    private readonly Button btnAdd = Ui.MakeButton("＋  加入資料夾或壓縮檔", false);
+    private readonly Button btnAdd = Ui.MakeButton("＋ 加入", ButtonKind.Outline);
 
     private readonly Button btnAnalyze = Ui.MakeButton("▶  開始比對", ButtonKind.Primary);
     private readonly Button btnCopy = Ui.MakeButton("複製新照片", ButtonKind.Outline);
@@ -36,6 +36,10 @@ public sealed class MainForm : Form
     private readonly TabStrip tabs = new();
     private readonly SearchBox search = new("搜尋檔名");
     private readonly Label lblSelection = new();
+    private readonly Label lblSubtitle = new();
+    private readonly Label lblBackupHint = new();
+    private int compactLevel = -1;
+    private Control? header;
     private readonly Label lblHint = new();
     private readonly DataGridView grid = new();
     private readonly Button btnExport = Ui.MakeButton("匯出清單…", false);
@@ -78,7 +82,7 @@ public sealed class MainForm : Form
         lstSources = new SourceList(tip);
         sourcesCard = new SectionPanel("來源資料",
             "可以加入資料夾或 zip 壓縮檔（例如從 Google 相簿下載的 zip），壓縮檔不用先解壓縮。" + Environment.NewLine
-            + "按「加入資料夾或壓縮檔」：選壓縮檔（可一次選多個）；要加入整個資料夾時，進入該資料夾後直接按「開啟」。" + Environment.NewLine
+            + "按右上角「＋ 加入」：選壓縮檔（可一次選多個）；要加入整個資料夾時，進入該資料夾後直接按「開啟」。" + Environment.NewLine
             + "也可以把壓縮檔或資料夾直接拖曳到清單裡，程式會自動判斷。滑鼠移到項目上會顯示完整路徑。",
             tip, large: true)
         {
@@ -120,7 +124,8 @@ public sealed class MainForm : Form
         Controls.Add(body);
         Controls.Add(BuildStatusBar());
         Controls.Add(BuildUpdateBar());
-        Controls.Add(BuildHeader());
+        header = BuildHeader();
+        Controls.Add(header);
 
         ResumeLayout(false);
         PerformLayout();
@@ -179,13 +184,11 @@ public sealed class MainForm : Form
             Font = new Font(Theme.FontName, 17f, FontStyle.Bold),
             Margin = new Padding(0),
         });
-        stack.Controls.Add(new Label
-        {
-            Text = "比對需匯入的來源資料，只把外接硬碟裡還沒有的照片放進去",
-            AutoSize = true,
-            ForeColor = Theme.TextGray,
-            Margin = new Padding(2, 2, 0, 0),
-        });
+        lblSubtitle.Text = "比對需匯入的來源資料，只把外接硬碟裡還沒有的照片放進去";
+        lblSubtitle.AutoSize = true;
+        lblSubtitle.ForeColor = Theme.TextGray;
+        lblSubtitle.Margin = new Padding(2, 2, 0, 0);
+        stack.Controls.Add(lblSubtitle);
         var pill = new PillLabel
         {
             Text = "照片只在本機處理",
@@ -266,17 +269,15 @@ public sealed class MainForm : Form
         };
         btnBrowseBackup.Margin = new Padding(0);
         btnBrowseBackup.Click += (_, _) => BrowseBackup();
-        var hint = new Label
-        {
-            Text = "用來檢查哪些照片已經備份；新照片會放進這裡的「_待整理」資料夾。",
-            AutoSize = false,
-            AutoEllipsis = true,
-            Dock = DockStyle.Fill,
-            Height = 26,
-            ForeColor = Theme.TextGray,
-            TextAlign = ContentAlignment.BottomLeft,
-            Margin = new Padding(0, 6, 0, 0),
-        };
+        var hint = lblBackupHint;
+        hint.Text = "用來檢查哪些照片已經備份；新照片會放進這裡的「_待整理」資料夾。";
+        hint.AutoSize = false;
+        hint.AutoEllipsis = true;
+        hint.Dock = DockStyle.Fill;
+        hint.Height = 26;
+        hint.ForeColor = Theme.TextGray;
+        hint.TextAlign = ContentAlignment.BottomLeft;
+        hint.Margin = new Padding(0, 6, 0, 0);
         tip.SetToolTip(hint, hint.Text);
         layout.Controls.Add(backupField, 0, 0);
         layout.Controls.Add(btnBrowseBackup, 1, 0);
@@ -300,8 +301,8 @@ public sealed class MainForm : Form
 
         lstSources.Dock = DockStyle.Fill;
         lstSources.Height = 70; // 兩列，超過時捲動
-        lstSources.Margin = new Padding(0, 0, 0, 8);
-        lstSources.EmptyText = "還沒有加入來源資料，可以直接把資料夾或 zip 拖曳到這裡";
+        lstSources.Margin = new Padding(0);
+        lstSources.EmptyText = "按右上角「＋ 加入」，或把資料夾、zip 拖曳到這裡";
         lstSources.AllowDrop = true;
         lstSources.DragEnter += (_, e) => e.Effect = !busy && e.Data?.GetDataPresent(DataFormats.FileDrop) == true ? DragDropEffects.Copy : DragDropEffects.None;
         lstSources.DragDrop += (_, e) =>
@@ -313,17 +314,17 @@ public sealed class MainForm : Form
         };
         lstSources.RemoveRequested += (_, path) => RemoveSource(path);
 
-        btnAdd.Dock = DockStyle.Fill;
+        // 「＋ 加入」放在卡片標題列右側，兩張卡片高度才對得齊，也把高度留給表格
         btnAdd.AutoSize = false;
-        btnAdd.Height = 34;
-        btnAdd.Margin = new Padding(0);
-        btnAdd.ForeColor = Theme.Accent;
+        btnAdd.MinimumSize = Size.Empty;
+        btnAdd.Size = new Size(84, 30);
+        btnAdd.Padding = new Padding(0);
         btnAdd.Font = new Font(Theme.FontName, 10f, FontStyle.Bold);
         btnAdd.Click += (_, _) => BrowseSources();
-        tip.SetToolTip(btnAdd, "選壓縮檔；要加入整個資料夾時，進入該資料夾後直接按「開啟」");
+        tip.SetToolTip(btnAdd, "加入資料夾或壓縮檔：選壓縮檔（可一次選多個）；要加入整個資料夾時，進入該資料夾後直接按「開啟」");
+        sourcesCard.HeaderAction = btnAdd;
 
         layout.Controls.Add(lstSources, 0, 0);
-        layout.Controls.Add(btnAdd, 0, 1);
         sourcesCard.Controls.Add(layout);
         return sourcesCard;
     }
@@ -472,6 +473,14 @@ public sealed class MainForm : Form
         tabs.SetTabs(new[] { "全部", "新照片", "曾遺失", "硬碟已有", "來源資料重複" });
         tabs.SelectedIndexChanged += (_, _) => RefreshGrid();
         search.Size = new Size(240, 34);
+        tabRow.SizeChanged += (_, _) =>
+        {
+            var want = Math.Min(Ui.Scaled(this, 240), Math.Max(Ui.Scaled(this, 150), tabRow.Width / 4));
+            if (search.Width != want && IsHandleCreated)
+            {
+                BeginInvoke(() => search.Width = want);
+            }
+        };
         search.Anchor = AnchorStyles.Right;
         search.Margin = new Padding(0);
         search.TextChanged += (_, _) => RefreshGrid();
@@ -581,6 +590,7 @@ public sealed class MainForm : Form
         grid.ColumnHeadersDefaultCellStyle.SelectionForeColor = Theme.TextDark;
         grid.ColumnHeadersDefaultCellStyle.Font = new Font(Theme.FontName, 10f, FontStyle.Bold);
         grid.ColumnHeadersDefaultCellStyle.Padding = new Padding(4, 0, 0, 0);
+        grid.ColumnHeadersDefaultCellStyle.WrapMode = DataGridViewTriState.False;
         grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
         grid.ColumnHeadersHeight = 36;
         grid.RowTemplate.Height = 34;
@@ -658,7 +668,37 @@ public sealed class MainForm : Form
         {
             WindowState = FormWindowState.Maximized;
         }
+        ApplyGridMetrics();
         UpdateCompactLayout();
+    }
+
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        base.OnDpiChanged(e);
+        ApplyGridMetrics();
+        compactLevel = -1;
+        UpdateCompactLayout();
+    }
+
+    /// <summary>
+    /// 表格的固定欄寬、列高不會跟著 DPI 自動放大（150% 時「大小」欄會被截成「14.3 ...」），
+    /// 所以每次都從 96 DPI 的基準值換算，不在現值上乘，避免重複放大。
+    /// </summary>
+    private void ApplyGridMetrics()
+    {
+        int S(int px) => Ui.Scaled(this, px);
+        grid.ColumnHeadersHeight = S(36);
+        grid.RowTemplate.Height = S(compactLevel == 2 ? 28 : 34);
+        var fixedWidths = new Dictionary<int, int> { [ColCheck] = 40, [ColSize] = 96, [ColStatus] = 130 };
+        foreach (DataGridViewColumn c in grid.Columns)
+        {
+            c.MinimumWidth = S(fixedWidths.TryGetValue(c.Index, out var fw) && c.Index == ColCheck ? 40 : 60);
+            if (fixedWidths.TryGetValue(c.Index, out var w))
+            {
+                c.Width = S(w);
+            }
+        }
+        RefreshGrid();
     }
 
     protected override void OnResize(EventArgs e)
@@ -667,17 +707,58 @@ public sealed class MainForm : Form
         UpdateCompactLayout();
     }
 
-    /// <summary>視窗矮（例如 1366×768 加上 125% 縮放）時收起統計卡，把高度留給表格；分頁上仍有數量。最小化時不動。</summary>
+    /// <summary>
+    /// 視窗矮時把高度留給表格（最小化時不動）：
+    /// 第 1 級（不到 700）收起統計卡，張數仍在分頁上；
+    /// 第 2 級（不到 620，例如 1366×768 筆電開 125%）再收起標題區、備份位置的說明，來源清單縮成一列（超過時捲動）。
+    /// </summary>
     private void UpdateCompactLayout()
     {
-        if (WindowState == FormWindowState.Minimized || ClientSize.Height <= 0)
+        if (!IsHandleCreated || WindowState == FormWindowState.Minimized || ClientSize.Height <= 0)
         {
             return;
         }
-        var compact = ClientSize.Height < Ui.Scaled(this, 700);
-        if (tilesRow.Visible == compact)
+        var h = ClientSize.Height;
+        var level = h < Ui.Scaled(this, 620) ? 2 : h < Ui.Scaled(this, 700) ? 1 : 0;
+        if (level == compactLevel)
         {
-            tilesRow.Visible = !compact;
+            return;
+        }
+        compactLevel = level;
+        BeginInvoke(() =>
+        {
+            SuspendLayout();
+            tilesRow.Visible = level == 0;
+            lblSubtitle.Visible = level < 2;
+            if (header is not null)
+            {
+                header.Visible = level < 2; // 視窗標題列已有程式名稱
+            }
+            lblBackupHint.Visible = level < 2;
+            lstSources.Height = Ui.Scaled(this, level < 2 ? 70 : 34);
+            foreach (var card in AllSections(this))
+            {
+                card.SetCompact(level == 2);
+            }
+            ApplyGridMetrics();
+            ResumeLayout(true);
+        });
+    }
+
+    internal int CompactLevel => compactLevel;
+
+    private static IEnumerable<SectionPanel> AllSections(Control parent)
+    {
+        foreach (Control c in parent.Controls)
+        {
+            if (c is SectionPanel sp)
+            {
+                yield return sp;
+            }
+            foreach (var inner in AllSections(c))
+            {
+                yield return inner;
+            }
         }
     }
 
@@ -1598,6 +1679,10 @@ public sealed class MainForm : Form
         lblStatus.Text = "正在下載新版本…";
         var progress = new Progress<double>(f =>
         {
+            if (!busy)
+            {
+                return; // 進度回報是非同步送達，最後一次可能晚於完成訊息，不能蓋掉它
+            }
             progressBar.Value = (int)Math.Clamp(f * progressBar.Maximum, 0, progressBar.Maximum);
             lblStatus.Text = $"正在下載新版本：{f:P0}";
         });

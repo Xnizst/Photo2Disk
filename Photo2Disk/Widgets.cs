@@ -394,7 +394,11 @@ internal sealed class TabStrip : Control
     private IEnumerable<(int Index, Rectangle Rect)> TabRects()
     {
         var x = 0;
-        var pad = Ui.Scaled(this, 14);
+        var visible = tabs.Where(t => t.Visible).ToList();
+        var textW = visible.Sum(t => TextRenderer.MeasureText(t.Text, boldFont).Width);
+        // 放不下時縮小左右間距（最少 4），避免最後一頁被截掉
+        var pad = visible.Count == 0 ? 0
+            : Math.Clamp((Width - textW) / (visible.Count * 2), Ui.Scaled(this, 4), Ui.Scaled(this, 14));
         for (var i = 0; i < tabs.Count; i++)
         {
             if (!tabs[i].Visible)

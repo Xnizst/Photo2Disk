@@ -55,66 +55,141 @@ internal static class Ui
 
     public static Button MakeButton(string text, ButtonKind kind)
     {
-        var b = new Button
+        var b = new RoundButton(kind)
         {
             Text = text,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            FlatStyle = FlatStyle.Flat,
-            Padding = new Padding(12, 3, 12, 3),
+            Padding = new Padding(14, 3, 14, 3),
             MinimumSize = new Size(0, 34),
             Margin = new Padding(0, 0, 8, 0),
             Cursor = Cursors.Hand,
-            UseVisualStyleBackColor = false,
+            ForeColor = kind == ButtonKind.Primary ? Color.White : kind == ButtonKind.Normal ? Theme.TextDark : Theme.Accent,
         };
-        switch (kind)
+        if (kind != ButtonKind.Normal)
         {
-            case ButtonKind.Primary:
-                b.BackColor = Theme.Accent;
-                b.ForeColor = Color.White;
-                b.Font = new Font(Theme.FontName, 10.5f, FontStyle.Bold);
-                b.FlatAppearance.BorderSize = 0;
-                b.FlatAppearance.MouseOverBackColor = Theme.AccentHover;
-                b.FlatAppearance.MouseDownBackColor = Theme.AccentHover;
-                b.EnabledChanged += (_, _) => b.BackColor = b.Enabled ? Theme.Accent : Theme.AccentDisabled;
-                break;
-            case ButtonKind.Outline:
-                b.BackColor = Color.White;
-                b.ForeColor = Theme.Accent;
-                b.Font = new Font(Theme.FontName, 10.5f, FontStyle.Bold);
-                b.FlatAppearance.BorderColor = Theme.Accent;
-                b.FlatAppearance.BorderSize = 1;
-                b.FlatAppearance.MouseOverBackColor = Theme.AccentSoft;
-                b.FlatAppearance.MouseDownBackColor = Theme.AccentLight;
-                b.EnabledChanged += (_, _) =>
-                {
-                    b.ForeColor = b.Enabled ? Theme.Accent : Theme.AccentDisabled;
-                    b.FlatAppearance.BorderColor = b.Enabled ? Theme.Accent : Theme.AccentDisabled;
-                };
-                break;
-            case ButtonKind.Link:
-                b.ForeColor = Theme.Accent;
-                b.Font = new Font(Theme.FontName, 10.5f, FontStyle.Underline);
-                b.FlatAppearance.BorderSize = 0;
-                b.FlatAppearance.MouseOverBackColor = Theme.AccentLight;
-                b.FlatAppearance.MouseDownBackColor = Theme.AccentLight;
-                b.EnabledChanged += (_, _) => b.ForeColor = b.Enabled ? Theme.Accent : Theme.AccentDisabled;
-                break;
-            default:
-                b.BackColor = Color.White;
-                b.ForeColor = Theme.TextDark;
-                b.FlatAppearance.BorderColor = Theme.Border;
-                b.FlatAppearance.BorderSize = 1;
-                b.FlatAppearance.MouseOverBackColor = Theme.AccentSoft;
-                b.FlatAppearance.MouseDownBackColor = Theme.AccentLight;
-                b.EnabledChanged += (_, _) =>
-                {
-                    b.BackColor = b.Enabled ? Color.White : Theme.Surface;
-                    b.FlatAppearance.BorderColor = b.Enabled ? Theme.Border : Theme.GridLine;
-                };
-                break;
+            b.Font = new Font(Theme.FontName, 10.5f, kind == ButtonKind.Link ? FontStyle.Underline : FontStyle.Bold);
         }
         return b;
+    }
+}
+
+/// <summary>圓角按鈕（YAN 2026-11-13 要求按鈕都要圓潤）。內建 Button 畫不出圓角，所以整個自己畫。</summary>
+internal sealed class RoundButton : Button
+{
+    private const int Radius96 = 8;
+    private bool hover;
+    private bool pressed;
+
+    public RoundButton(ButtonKind kind)
+    {
+        Kind = kind;
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer
+                 | ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
+        FlatStyle = FlatStyle.Flat;
+        FlatAppearance.BorderSize = 0;
+        UseVisualStyleBackColor = false;
+        BackColor = Color.Transparent;
+    }
+
+    public ButtonKind Kind { get; }
+
+    protected override void OnMouseEnter(EventArgs e)
+    {
+        base.OnMouseEnter(e);
+        hover = true;
+        Invalidate();
+    }
+
+    protected override void OnMouseLeave(EventArgs e)
+    {
+        base.OnMouseLeave(e);
+        hover = false;
+        pressed = false;
+        Invalidate();
+    }
+
+    protected override void OnMouseDown(MouseEventArgs mevent)
+    {
+        base.OnMouseDown(mevent);
+        if (mevent.Button == MouseButtons.Left)
+        {
+            pressed = true;
+            Invalidate();
+        }
+    }
+
+    protected override void OnMouseUp(MouseEventArgs mevent)
+    {
+        base.OnMouseUp(mevent);
+        pressed = false;
+        Invalidate();
+    }
+
+    protected override void OnEnabledChanged(EventArgs e)
+    {
+        base.OnEnabledChanged(e);
+        hover = false;
+        pressed = false;
+        Invalidate();
+    }
+
+    protected override void OnPaint(PaintEventArgs pevent)
+    {
+        var g = pevent.Graphics;
+        g.Clear(Parent?.BackColor ?? Color.White);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        var on = Enabled;
+        Color? fill;
+        Color? border;
+        Color text;
+        switch (Kind)
+        {
+            case ButtonKind.Primary:
+                fill = !on ? Theme.AccentDisabled : pressed || hover ? Theme.AccentHover : Theme.Accent;
+                border = null;
+                text = Color.White;
+                break;
+            case ButtonKind.Outline:
+                fill = !on ? Color.White : pressed ? Theme.AccentLight : hover ? Theme.AccentSoft : Color.White;
+                border = on ? Theme.Accent : Theme.AccentDisabled;
+                text = on ? Theme.Accent : Theme.AccentDisabled;
+                break;
+            case ButtonKind.Link:
+                fill = on && (hover || pressed) ? Theme.AccentLight : null;
+                border = null;
+                text = on ? Theme.Accent : Theme.AccentDisabled;
+                break;
+            default:
+                fill = !on ? Theme.Surface : pressed ? Theme.AccentLight : hover ? Theme.AccentSoft : Color.White;
+                border = on ? Theme.Border : Theme.GridLine;
+                text = on ? ForeColor : Theme.TextGray;
+                break;
+        }
+        var rect = new Rectangle(0, 0, Width - 1, Height - 1);
+        var radius = Math.Min(Ui.Scaled(this, Radius96), Height / 2);
+        using (var path = SectionPanel.RoundedRect(rect, radius))
+        {
+            if (fill is { } f)
+            {
+                using var brush = new SolidBrush(f);
+                g.FillPath(brush, path);
+            }
+            if (border is { } bc)
+            {
+                using var pen = new Pen(bc);
+                g.DrawPath(pen, path);
+            }
+        }
+        if (Focused && ShowFocusCues && on)
+        {
+            var inset = Ui.Scaled(this, 3);
+            using var focus = SectionPanel.RoundedRect(Rectangle.Inflate(rect, -inset, -inset), Math.Max(2, radius - inset));
+            using var pen = new Pen(Kind == ButtonKind.Primary ? Color.White : Theme.Accent) { DashStyle = DashStyle.Dot };
+            g.DrawPath(pen, focus);
+        }
+        TextRenderer.DrawText(g, Text, Font, ClientRectangle, text,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
     }
 }
 
@@ -156,6 +231,19 @@ internal sealed class SectionPanel : Panel
         }
     }
 
+    /// <summary>視窗很矮時壓低主畫面卡片的標題列。</summary>
+    public void SetCompact(bool compact)
+    {
+        if (!large)
+        {
+            return;
+        }
+        Padding = compact ? new Padding(Ui.Scaled(this, 18), Ui.Scaled(this, 38), Ui.Scaled(this, 18), Ui.Scaled(this, 8))
+            : new Padding(Ui.Scaled(this, 18), Ui.Scaled(this, 48), Ui.Scaled(this, 18), Ui.Scaled(this, 14));
+        PerformLayout();
+        Invalidate();
+    }
+
     /// <summary>標題前的步驟編號（主畫面的 1、2）。</summary>
     public string? Step { get; set; }
 
@@ -179,6 +267,27 @@ internal sealed class SectionPanel : Panel
 
     private int TitleBandHeight => Padding.Top - (large ? Ui.Scaled(this, 6) : 0);
 
+    private Control? headerAction;
+
+    /// <summary>放在標題列右側的按鈕（例如來源資料的「＋ 加入」）。</summary>
+    public Control? HeaderAction
+    {
+        get => headerAction;
+        set
+        {
+            if (headerAction is not null)
+            {
+                Controls.Remove(headerAction);
+            }
+            headerAction = value;
+            if (value is not null)
+            {
+                Controls.Add(value);
+            }
+            PerformLayout();
+        }
+    }
+
     protected override void OnLayout(LayoutEventArgs levent)
     {
         base.OnLayout(levent);
@@ -186,6 +295,11 @@ internal sealed class SectionPanel : Panel
         {
             var w = TextRenderer.MeasureText(FullTitle, titleFont).Width;
             info.Location = new Point(TitleLeft + w + Ui.Scaled(this, 2), (TitleBandHeight - info.Height) / 2 + Ui.Scaled(this, 2));
+        }
+        if (headerAction is not null)
+        {
+            headerAction.Location = new Point(Width - Padding.Right - headerAction.Width,
+                (TitleBandHeight - headerAction.Height) / 2 + Ui.Scaled(this, 2));
         }
     }
 
