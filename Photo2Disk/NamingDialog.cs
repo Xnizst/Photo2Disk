@@ -39,6 +39,7 @@ internal sealed class NamingDialog : Form
         ForeColor = Theme.TextDark;
         BackColor = Color.White;
         Text = "檔名規則";
+        Icon = Ui.AppIcon ?? Icon;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;

@@ -8,7 +8,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Photo2Disk</RootNamespace>
     <AssemblyName>照片備份過濾工具</AssemblyName>
-    <Version>1.2.0</Version>
+    <Version>1.2.1</Version>
+    <ApplicationIcon>app.ico</ApplicationIcon>
     <Product>照片備份過濾工具</Product>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
@@ -17,5 +18,9 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="app.ico" LogicalName="Photo2Disk.app.ico" />
+  </ItemGroup>
 
 </Project>

@@ -60,6 +60,7 @@ public sealed class MainForm : Form
         ForeColor = Theme.TextDark;
         BackColor = Color.White;
         Text = AppTitle + " v" + VersionText;
+        Icon = Ui.AppIcon ?? Icon;
         StartPosition = FormStartPosition.CenterScreen;
         Size = new Size(1000, 760);
         MinimumSize = new Size(820, 640);

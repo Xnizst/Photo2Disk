@@ -23,6 +23,22 @@ internal static class Theme
 
 internal static class Ui
 {
+    private static Icon? appIcon;
+
+    /// <summary>程式圖示（內嵌資源 app.ico，由 tools/make_icon.py 產生）。</summary>
+    public static Icon? AppIcon
+    {
+        get
+        {
+            if (appIcon is null)
+            {
+                using var s = typeof(Ui).Assembly.GetManifestResourceStream("Photo2Disk.app.ico");
+                appIcon = s is null ? null : new Icon(s);
+            }
+            return appIcon;
+        }
+    }
+
     /// <summary>自繪程式碼用：96 DPI 的像素數換算成目前 DPI。</summary>
     public static int Scaled(Control c, int px) => (int)Math.Round(px * c.DeviceDpi / 96.0);
 
