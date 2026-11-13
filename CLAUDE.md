@@ -18,9 +18,9 @@
 - 只看硬碟現況：匯入過的照片若被刪除，下次下載到時會再匯入（YAN 2026-11-07 決定，不小心刪除時可以補回）。但要標示出來：匯入紀錄存在 `ImportHistory.cs` 的隱藏檔 `.photo2disk_history.tsv`（只附加），比對時新照片若在紀錄裡，狀態顯示「曾遺失」（複製後「已補回」），並註明當初匯入的日期與位置。只記錄本程式匯入的照片，使用本程式之前就在硬碟裡的照片被刪除不會標示。
 - 來源重複要提示（YAN 2026-11-12 決定，取代 11-07「不顯示這批重複」）：同學回報資料夾 9,945 個檔案只複製了 9,568 張，原因是被隱藏的重複檔。現在比對結果多一個琥珀色「來源資料重複：N 張（只複製一份）」標籤（點一下切到該篩選），比對後跳出視窗列出前 8 組重複檔（`MainForm.DuplicateMessage`），顯示篩選多「來源資料重複」，「全部」與 CSV 也列出這些項目，每列註明與哪個檔案重複。引擎改成先判斷同一批內是否重複，再看硬碟有沒有，所以「新照片＋硬碟已有＋來源資料重複」＝來源資料的檔案數（略過的 0 位元組、`desktop.ini`、系統檔不算在內）。
 - 介面用語（YAN 2026-11-12）：來源一律稱「需匯入的來源資料」「來源資料」，重複稱「來源資料重複」，不寫「從 Google 下載的檔案」（來源不一定是 Google 下載的 zip）。只有說明 zip 用法、Google 相簿編輯過的照片時才提到 Google。
-- 下載檔案區只有「加入…」與「移除」兩個按鈕（YAN 2026-11-07 要求程式自動判斷資料夾或壓縮檔）。Windows 沒有可同時選檔案與資料夾的標準視窗，所以「加入…」用 `OpenFileDialog`（`CheckFileExists=false`、`ValidateNames=false`），檔名欄預設「加入這個資料夾」：選了檔案就加入檔案，維持預設文字按「開啟」就加入目前所在資料夾（`ResolveDialogSelection`）。坑：Windows 視窗會依篩選條件把預設文字補成「加入這個資料夾.zip」，`AddExtension=false` 也擋不住（2026-11-07 用 `tests\UiTest\DialogProbe.cs` 實際開視窗按開啟重現），所以判斷時忽略副檔名比對預設文字。加入下載、桌面、文件、使用者資料夾或磁碟根目錄時先確認。「全部清除」拿掉，改用 Ctrl+A 全選後移除。
+- 下載檔案區只有「加入…」與「移除」兩個按鈕（YAN 2026-11-07 要求程式自動判斷資料夾或壓縮檔）。Windows 沒有可同時選檔案與資料夾的標準視窗，所以「加入…」用 `OpenFileDialog`（`CheckFileExists=false`、`ValidateNames=false`），檔名欄預設「加入這個資料夾」：選了檔案就加入檔案，維持預設文字按「開啟」就加入目前所在資料夾（`ResolveDialogSelection`）。坑：Windows 視窗會依篩選條件把預設文字補成「加入這個資料夾.zip」，`AddExtension=false` 也擋不住（2026-11-07 用 `tests\UiTest\DialogProbe.cs` 實際開視窗按開啟重現），所以判斷時忽略副檔名比對預設文字。加入下載、桌面、文件、使用者資料夾或磁碟根目錄時先確認。1.3.0 起清單每列右側有 ×，「移除」按鈕與 Ctrl+A／Delete 拿掉。
 - 重複加入清單中已有的檔案時，清除舊結果並在狀態列提示重新比對（原本沒有提示，YAN 誤以為比對沒生效）。
-- 複製時統一檔名（YAN 2026-11-13，同學要求「拍照實際年月-原檔名」）：只在「② 複製新照片」時改名，不改硬碟原有檔案（YAN 選定，維持只新增不修改）。主畫面「檔名規則…」開 `NamingDialog`，預設保留原檔名。可組合項目：拍攝日期（6 種格式）、原檔名、自訂文字、流水號、相機／手機型號、照片／影片、所在資料夾名稱，另有 6 組快速套用。拍攝日期依序取 EXIF → 影片 mvhd → 原檔名日期 → 檔案修改時間（YAN 選定），後兩者在結果清單註明。
+- 複製時統一檔名（YAN 2026-11-13，同學要求「拍照實際年月-原檔名」）：只在「複製新照片」時改名，不改硬碟原有檔案（YAN 選定，維持只新增不修改）。主畫面「檔名規則…」開 `NamingDialog`，預設保留原檔名。可組合項目：拍攝日期（6 種格式）、原檔名、自訂文字、流水號、相機／手機型號、照片／影片、所在資料夾名稱，另有 6 組快速套用。拍攝日期依序取 EXIF → 影片 mvhd → 原檔名日期 → 檔案修改時間（YAN 選定），後兩者在結果清單註明。
 
 ## 建置
 
@@ -28,7 +28,8 @@
 - 發佈：在 `Photo2Disk\` 執行 `dotnet publish -c Release -o ..\publish`，產出 `publish\照片備份過濾工具.exe`（自包含單一 exe，約 70 MB）。
 - 發佈新版給同學（自動更新）：改 `<Version>` → 專案根目錄執行 `python tools/make_release.py`，產出 `release\v<版本>\Photo2Disk.exe` 與 `.sha256` → 建立 Release（Tag `v<版本>`，說明欄寫更新內容）上傳這兩個檔案：桌機已裝 `gh` 並登入 Xnizst（2026-11-13），可用 `"C:\Program Files\GitHub CLI\gh.exe" release create v<版本> release/v<版本>/Photo2Disk.exe release/v<版本>/Photo2Disk.exe.sha256 --repo Xnizst/Photo2Disk --title v<版本> --notes "…"`；筆電沒有 `gh` 時用網頁建立。附件用英文檔名，因為 GitHub 會改寫非英文檔名；更新時沿用使用者電腦上原本的檔名。不要勾 pre-release（程式會略過），也不要漏掉 `.sha256`（沒有就不提示更新）。
 - 版本號只寫在 `Photo2Disk.csproj` 的 `<Version>`。
-- 程式圖示（YAN 2026-11-13 從三個候選選 A：藍綠底照片＋琥珀色匯入箭頭）：`python tools/make_icon.py A` 產生 `Photo2Disk/app.ico`（16～256 像素，32 像素以下用加粗版），csproj 的 `ApplicationIcon` 給 exe 用，同一檔案以 `EmbeddedResource`（`Photo2Disk.app.ico`）給視窗標題列用（`Ui.AppIcon`）。`--preview` 產生比較圖 `tools/icon_preview.png`。
+- 介面改版（YAN 2026-11-13，參考 GPT 產生的設計稿，1.3.0）：YAN 選定改用設計稿的亮藍色系（`Theme.Accent` #0B6BD8，取代原本石板藍＋藍綠，這是本專案特例，其他工具仍照 Windows 桌面規則的配色），淺灰藍視窗底、白色圓角卡片；標題區有程式圖示與「照片只在本機處理」標示；備份位置與來源資料左右並排（步驟 1、2）；統計數字卡＋分頁＋搜尋；表格每列勾選框（預設全勾，`SourceItem.Excluded`，複製時略過未勾選）；狀態用膠囊標籤；最下方狀態列。YAN 選擇不顯示縮圖（zip 要解壓、HEIC 需要解碼器、數千張會拖慢）。視窗高度不到 700（96 DPI 換算）時收起數字卡（`UpdateCompactLayout`，最小化時不動）。設計稿與漏斗圖示原檔在專案根目錄（`GPT介面設計參考.png`、`photo-backup-filter-icon-light.png`），不進 git。
+- 程式圖示：1.3.0 起改用 GPT 產生的漏斗圖示（YAN 選定），`python tools/make_icon.py --from tools/icon_source.png` 清掉幾乎透明的雜點、裁切置中後產生 `Photo2Disk/app.ico`。1.2.1 的自繪圖示（`make_icon.py A`）保留在腳本裡。產生 `Photo2Disk/app.ico`（16～256 像素），csproj 的 `ApplicationIcon` 給 exe 用，同一檔案以 `EmbeddedResource`（`Photo2Disk.app.ico`）給視窗標題列用（`Ui.AppIcon`）。`--preview` 產生比較圖 `tools/icon_preview.png`。
 
 ## 架構
 
@@ -45,7 +46,8 @@
 - `ReorderCheckList.cs`：檔名組成清單（YAN 2026-11-13 要求支援滑鼠上下拖動）。自繪元件：點一下勾選、按住拖動排序（藍綠插入線）、Ctrl＋上下鍵移動。坑：內建 `CheckedListBox` 按下滑鼠時就改選取與勾選，和拖動衝突，所以不用它。
 - `Updater.cs`：自動更新（YAN 2026-11-13）。啟動時查 GitHub「最新 Release」API（10 秒逾時，失敗安靜略過），有新版且不是使用者略過的版本時，主畫面標題下方顯示藍綠提示列（立即更新／略過這一版／更新內容）。按更新才下載（同學確認後才執行），下載到 `<exe>.download` 並核對 SHA-256，執行中的 exe 改名成 `.old`（執行中不能覆寫但可以改名），新版放回原檔名後重新啟動；下次啟動在背景刪 `.old`。比對或複製進行中不能更新，下載中可按「取消」。設定 `CheckForUpdates`（預設 true，介面上沒有開關）、`SkippedVersion`。環境變數 `PHOTO2DISK_UPDATE_API` 可改 API 網址（測試用）。程式所在資料夾無法寫入時（例如放在 Program Files）會提示搬到自己的資料夾。
 - `HashIndex.cs`：雜湊快取，存在備份資料夾根目錄的隱藏檔 `.photo2disk_index.tsv`（相對路徑、大小、修改時間、SHA-256）。大小或修改時間改變就重算；沒有變動時不重寫。
-- `MainForm.cs`：介面（WinForms，`AutoScaleMode.Dpi`，以 96 DPI 座標撰寫）。
+- `MainForm.cs`：介面（WinForms，`AutoScaleMode.Dpi`，以 96 DPI 座標撰寫）。表格的勾選框與狀態標籤在 `CellPainting` 自己畫（不用 `DataGridViewCheckBoxColumn`，虛擬模式下要處理編輯提交，也畫不出設計稿的樣式）。
+- `Widgets.cs`：主畫面自繪元件：`PillLabel`、`SourceList`（來源清單，× 移除、滑鼠提示完整路徑、超過兩列捲動）、`StatTile`、`TabStrip`、`SearchBox`（也包住唯讀的備份路徑欄）、`StateLabel`、`Glyphs`（資料夾、zip、勾選框、完成圖示）。坑：視窗顯示前 `Control.Visible` 一律回傳 false，統計卡的顯示狀態要自己記錄。
 - `Settings.cs`：記住上次的備份資料夾，存 `%APPDATA%\Photo2Disk\settings.json`；環境變數 `PHOTO2DISK_SETTINGS_DIR` 可改位置（測試用）。
 
 ## 測試

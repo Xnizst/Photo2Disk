@@ -12,24 +12,31 @@ public sealed class MainForm : Form
     private readonly Settings settings = Settings.Load();
 
     private readonly TextBox txtBackup = new();
-    private readonly ListBox lstSources = new();
+    private readonly SourceList lstSources;
+    private readonly SectionPanel sourcesCard;
     private readonly Button btnBrowseBackup = Ui.MakeButton("選擇資料夾…", false);
-    private readonly Button btnAdd = Ui.MakeButton("加入…", false);
-    private readonly Button btnRemove = Ui.MakeButton("移除", false);
+    private readonly Button btnAdd = Ui.MakeButton("＋  加入資料夾或壓縮檔", false);
 
-    private readonly Button btnAnalyze = Ui.MakeButton("① 開始比對", true);
-    private readonly Button btnCopy = Ui.MakeButton("② 複製新照片", true);
-    private readonly Button btnNaming = Ui.MakeButton("檔名規則…", false);
+    private readonly Button btnAnalyze = Ui.MakeButton("▶  開始比對", ButtonKind.Primary);
+    private readonly Button btnCopy = Ui.MakeButton("複製新照片", ButtonKind.Outline);
+    private readonly Button btnNaming = Ui.MakeButton("檔名規則…", ButtonKind.Link);
     private readonly Button btnCancel = Ui.MakeButton("取消", false);
     private readonly ProgressBar progressBar = new();
+    private readonly TableLayoutPanel progressArea = new();
+    private readonly StateLabel lblState = new();
     private readonly Label lblStatus = new();
+    private readonly Panel statusBar = new();
+    private Color statusColor = Theme.TextGray;
 
-    private readonly Label lblNew = new();
-    private readonly Label lblExisting = new();
-    private readonly Label lblMissing = new();
-    private readonly Label lblDuplicate = new();
+    private readonly TableLayoutPanel tilesRow = new();
+    private readonly StatTile tileNew = new() { Caption = "新照片", FillColor = Theme.AccentLight, NumberColor = Theme.Accent };
+    private readonly StatTile tileExisting = new() { Caption = "硬碟已有", FillColor = Theme.Surface, NumberColor = Theme.TextDark };
+    private readonly StatTile tileDuplicate = new() { Caption = "來源資料重複", FillColor = Theme.AmberLight, NumberColor = Theme.Amber };
+    private readonly StatTile tileTotal = new() { Caption = "已掃描", FillColor = Theme.Surface, NumberColor = Theme.TextDark };
+    private readonly TabStrip tabs = new();
+    private readonly SearchBox search = new("搜尋檔名");
+    private readonly Label lblSelection = new();
     private readonly Label lblHint = new();
-    private readonly ComboBox cboFilter = new();
     private readonly DataGridView grid = new();
     private readonly Button btnExport = Ui.MakeButton("匯出清單…", false);
     private readonly Button btnOpenFolder = Ui.MakeButton("開啟待整理資料夾", false);
@@ -49,40 +56,69 @@ public sealed class MainForm : Form
     private string? lastOutputFolder;
     private string currentStage = "";
     private readonly Stopwatch stageWatch = new();
-    private readonly Font boldCellFont = new(Theme.FontName, 10f, FontStyle.Bold);
+    private readonly Font pillFont = new(Theme.FontName, 9f, FontStyle.Bold);
+
+    // 表格欄位
+    private const int ColCheck = 0;
+    private const int ColName = 1;
+    private const int ColLocation = 2;
+    private const int ColSize = 3;
+    private const int ColStatus = 4;
+    private const int ColMatch = 5;
+
+    // 分頁（和舊版下拉選單的順序相同）
+    private const int FilterAll = 0;
+    private const int FilterNew = 1;
+    private const int FilterMissing = 2;
+    private const int FilterExisting = 3;
+    private const int FilterDuplicate = 4;
 
     public MainForm()
     {
+        lstSources = new SourceList(tip);
+        sourcesCard = new SectionPanel("來源資料",
+            "可以加入資料夾或 zip 壓縮檔（例如從 Google 相簿下載的 zip），壓縮檔不用先解壓縮。" + Environment.NewLine
+            + "按「加入資料夾或壓縮檔」：選壓縮檔（可一次選多個）；要加入整個資料夾時，進入該資料夾後直接按「開啟」。" + Environment.NewLine
+            + "也可以把壓縮檔或資料夾直接拖曳到清單裡，程式會自動判斷。滑鼠移到項目上會顯示完整路徑。",
+            tip, large: true)
+        {
+            Step = "2",
+            FolderGlyph = true,
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = new Padding(6, 0, 0, 0),
+        };
+
         SuspendLayout();
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
         Font = new Font(Theme.FontName, 10f);
         ForeColor = Theme.TextDark;
-        BackColor = Color.White;
+        BackColor = Theme.WindowBack;
         Text = AppTitle + " v" + VersionText;
         Icon = Ui.AppIcon ?? Icon;
         StartPosition = FormStartPosition.CenterScreen;
-        Size = new Size(1000, 760);
-        MinimumSize = new Size(820, 640);
+        Size = new Size(1060, 820);
+        MinimumSize = new Size(860, 660);
 
         var body = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 4,
-            Padding = new Padding(16, 14, 16, 12),
+            RowCount = 3,
+            Padding = new Padding(18, 4, 18, 12),
         };
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         body.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         body.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        body.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         body.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        body.Controls.Add(BuildBackupSection(), 0, 0);
-        body.Controls.Add(BuildSourcesSection(), 0, 1);
-        body.Controls.Add(BuildActionRow(), 0, 2);
-        body.Controls.Add(BuildResultsSection(), 0, 3);
+        body.Controls.Add(BuildInputsRow(), 0, 0);
+        body.Controls.Add(BuildActionRow(), 0, 1);
+        body.Controls.Add(BuildResultsSection(), 0, 2);
 
         Controls.Add(body);
+        Controls.Add(BuildStatusBar());
         Controls.Add(BuildUpdateBar());
         Controls.Add(BuildHeader());
 
@@ -94,6 +130,7 @@ public sealed class MainForm : Form
             txtBackup.Text = settings.BackupFolder;
         }
         ResetResults();
+        UpdateSourcesBadge();
         UpdateButtons();
     }
 
@@ -101,71 +138,124 @@ public sealed class MainForm : Form
 
     private Control BuildHeader()
     {
-        var header = new Panel
+        var header = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            BackColor = Theme.Primary,
-            Padding = new Padding(20, 10, 20, 10),
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            ColumnCount = 3,
+            RowCount = 1,
+            Padding = new Padding(20, 14, 20, 10),
         };
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        var logo = new PictureBox
+        {
+            Size = new Size(52, 52),
+            SizeMode = PictureBoxSizeMode.Zoom,
+            Margin = new Padding(0, 0, 14, 0),
+            Anchor = AnchorStyles.Left,
+        };
+        if (Ui.AppIcon is { } icon)
+        {
+            using var big = new Icon(icon, 128, 128);
+            logo.Image = big.ToBitmap();
+        }
         var stack = new FlowLayoutPanel
         {
-            Dock = DockStyle.Top,
             FlowDirection = FlowDirection.TopDown,
             WrapContents = false,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            BackColor = Theme.Primary,
+            Anchor = AnchorStyles.Left,
+            Margin = new Padding(0),
         };
         stack.Controls.Add(new Label
         {
             Text = AppTitle,
             AutoSize = true,
-            ForeColor = Color.White,
-            Font = new Font(Theme.FontName, 15f, FontStyle.Bold),
+            ForeColor = Theme.TextDark,
+            Font = new Font(Theme.FontName, 17f, FontStyle.Bold),
             Margin = new Padding(0),
         });
         stack.Controls.Add(new Label
         {
             Text = "比對需匯入的來源資料，只把外接硬碟裡還沒有的照片放進去",
             AutoSize = true,
-            ForeColor = Theme.HeaderSub,
-            Margin = new Padding(1, 2, 0, 0),
+            ForeColor = Theme.TextGray,
+            Margin = new Padding(2, 2, 0, 0),
         });
-        header.Controls.Add(stack);
+        var pill = new PillLabel
+        {
+            Text = "照片只在本機處理",
+            Anchor = AnchorStyles.Right,
+            Margin = new Padding(0),
+            Font = new Font(Theme.FontName, 10f, FontStyle.Bold),
+        };
+        tip.SetToolTip(pill, "比對與複製都在這台電腦上進行，照片不會上傳到任何地方。" + Environment.NewLine
+            + "只有開啟程式時會連到 GitHub 查詢有沒有新版本。");
+        header.Controls.Add(logo, 0, 0);
+        header.Controls.Add(stack, 1, 0);
+        header.Controls.Add(pill, 2, 0);
         return header;
     }
 
-    private Control BuildBackupSection()
+    private Control BuildInputsRow()
     {
-        var section = new SectionPanel("已備份照片的資料夾",
-            "外接硬碟上放照片的資料夾，裡面的子資料夾也會一起比對。" + Environment.NewLine
-            + "新照片會複製到這個資料夾裡的「_待整理\\日期」資料夾，整理時可以隨意搬移、改名，不影響下次比對。",
-            tip)
-        {
-            Dock = DockStyle.Fill,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-        };
         var row = new TableLayoutPanel
         {
-            Dock = DockStyle.Top,
+            Dock = DockStyle.Fill,
             ColumnCount = 2,
             RowCount = 1,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = new Padding(0, 0, 0, 12),
         };
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        row.Controls.Add(BuildBackupSection(), 0, 0);
+        row.Controls.Add(BuildSourcesSection(), 1, 0);
+        return row;
+    }
+
+    private Control BuildBackupSection()
+    {
+        var section = new SectionPanel("備份位置",
+            "外接硬碟上放照片的資料夾，裡面的子資料夾也會一起比對。" + Environment.NewLine
+            + "新照片會複製到這個資料夾裡的「_待整理\\日期」資料夾，整理時可以隨意搬移、改名，不影響下次比對。",
+            tip, large: true)
+        {
+            Step = "1",
+            FolderGlyph = true,
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = new Padding(0, 0, 6, 0),
+        };
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            ColumnCount = 2,
+            RowCount = 2,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
         txtBackup.ReadOnly = true;
         txtBackup.TabStop = false;
-        txtBackup.BackColor = Color.White;
-        txtBackup.Dock = DockStyle.Fill;
         txtBackup.PlaceholderText = "請選擇外接硬碟上放照片的資料夾";
-        txtBackup.Margin = new Padding(0, 4, 8, 0);
         txtBackup.AllowDrop = true;
+        txtBackup.TextChanged += (_, _) => tip.SetToolTip(txtBackup, txtBackup.Text);
+        var backupField = new SearchBox(txtBackup, false)
+        {
+            Dock = DockStyle.Fill,
+            Height = 34,
+            Margin = new Padding(0, 0, 10, 0),
+        };
+        txtBackup.BackColor = Theme.TableHead;
         txtBackup.DragEnter += (_, e) => e.Effect = !busy && e.Data?.GetDataPresent(DataFormats.FileDrop) == true ? DragDropEffects.Link : DragDropEffects.None;
         txtBackup.DragDrop += (_, e) =>
         {
@@ -176,43 +266,42 @@ public sealed class MainForm : Form
         };
         btnBrowseBackup.Margin = new Padding(0);
         btnBrowseBackup.Click += (_, _) => BrowseBackup();
-
-        row.Controls.Add(txtBackup, 0, 0);
-        row.Controls.Add(btnBrowseBackup, 1, 0);
-        section.Controls.Add(row);
+        var hint = new Label
+        {
+            Text = "用來檢查哪些照片已經備份；新照片會放進這裡的「_待整理」資料夾。",
+            AutoSize = false,
+            AutoEllipsis = true,
+            Dock = DockStyle.Fill,
+            Height = 26,
+            ForeColor = Theme.TextGray,
+            TextAlign = ContentAlignment.BottomLeft,
+            Margin = new Padding(0, 6, 0, 0),
+        };
+        tip.SetToolTip(hint, hint.Text);
+        layout.Controls.Add(backupField, 0, 0);
+        layout.Controls.Add(btnBrowseBackup, 1, 0);
+        layout.Controls.Add(hint, 0, 1);
+        layout.SetColumnSpan(hint, 2);
+        section.Controls.Add(layout);
         return section;
     }
 
     private Control BuildSourcesSection()
     {
-        var section = new SectionPanel("需匯入的來源資料",
-            "可以加入資料夾或 zip 壓縮檔（例如從 Google 相簿下載的 zip），壓縮檔不用先解壓縮。" + Environment.NewLine
-            + "按「加入…」：選壓縮檔（可一次選多個）；要加入整個資料夾時，進入該資料夾後直接按「開啟」。" + Environment.NewLine
-            + "也可以把壓縮檔或資料夾直接拖曳到清單裡，程式會自動判斷。",
-            tip)
-        {
-            Dock = DockStyle.Fill,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-        };
-        var row = new TableLayoutPanel
+        var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
-            ColumnCount = 2,
-            RowCount = 1,
+            ColumnCount = 1,
+            RowCount = 2,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
         };
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
         lstSources.Dock = DockStyle.Fill;
-        lstSources.Height = 70;
-        lstSources.IntegralHeight = false;
-        lstSources.HorizontalScrollbar = true;
-        lstSources.SelectionMode = SelectionMode.MultiExtended;
-        lstSources.BorderStyle = BorderStyle.FixedSingle;
-        lstSources.Margin = new Padding(0, 0, 8, 0);
+        lstSources.Height = 70; // 兩列，超過時捲動
+        lstSources.Margin = new Padding(0, 0, 0, 8);
+        lstSources.EmptyText = "還沒有加入來源資料，可以直接把資料夾或 zip 拖曳到這裡";
         lstSources.AllowDrop = true;
         lstSources.DragEnter += (_, e) => e.Effect = !busy && e.Data?.GetDataPresent(DataFormats.FileDrop) == true ? DragDropEffects.Copy : DragDropEffects.None;
         lstSources.DragDrop += (_, e) =>
@@ -222,49 +311,21 @@ public sealed class MainForm : Form
                 AddSources(paths);
             }
         };
-        lstSources.SelectedIndexChanged += (_, _) => UpdateButtons();
-        lstSources.KeyDown += (_, e) =>
-        {
-            if (e.KeyCode == Keys.Delete)
-            {
-                RemoveSelectedSources();
-            }
-            else if (e.Control && e.KeyCode == Keys.A)
-            {
-                for (var i = 0; i < lstSources.Items.Count; i++)
-                {
-                    lstSources.SetSelected(i, true);
-                }
-                e.SuppressKeyPress = true;
-            }
-        };
+        lstSources.RemoveRequested += (_, path) => RemoveSource(path);
 
-        var buttons = new FlowLayoutPanel
-        {
-            FlowDirection = FlowDirection.TopDown,
-            WrapContents = false,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Margin = new Padding(0),
-        };
-        foreach (var b in new[] { btnAdd, btnRemove })
-        {
-            b.MinimumSize = Size.Empty;
-            b.AutoSize = false;
-            b.Size = new Size(118, 32);
-            b.Padding = new Padding(0);
-            b.Margin = new Padding(0, b == btnAdd ? 0 : 6, 0, 0);
-            buttons.Controls.Add(b);
-        }
+        btnAdd.Dock = DockStyle.Fill;
+        btnAdd.AutoSize = false;
+        btnAdd.Height = 34;
+        btnAdd.Margin = new Padding(0);
+        btnAdd.ForeColor = Theme.Accent;
+        btnAdd.Font = new Font(Theme.FontName, 10f, FontStyle.Bold);
         btnAdd.Click += (_, _) => BrowseSources();
-        btnRemove.Click += (_, _) => RemoveSelectedSources();
         tip.SetToolTip(btnAdd, "選壓縮檔；要加入整個資料夾時，進入該資料夾後直接按「開啟」");
-        tip.SetToolTip(btnRemove, "移除清單中選取的項目（Ctrl+A 全選，Delete 鍵也可以移除）");
 
-        row.Controls.Add(lstSources, 0, 0);
-        row.Controls.Add(buttons, 1, 0);
-        section.Controls.Add(row);
-        return section;
+        layout.Controls.Add(lstSources, 0, 0);
+        layout.Controls.Add(btnAdd, 0, 1);
+        sourcesCard.Controls.Add(layout);
+        return sourcesCard;
     }
 
     private Control BuildActionRow()
@@ -272,7 +333,7 @@ public sealed class MainForm : Form
         var row = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 5,
+            ColumnCount = 4,
             RowCount = 1,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
@@ -282,72 +343,69 @@ public sealed class MainForm : Form
         row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
         foreach (var b in new[] { btnAnalyze, btnCopy })
         {
             b.AutoSize = false;
-            b.Size = new Size(150, 38);
-            b.Margin = new Padding(0, 0, 10, 0);
+            b.Size = new Size(160, 40);
+            b.Margin = new Padding(0, 0, 12, 0);
         }
         btnAnalyze.Click += async (_, _) => await AnalyzeAsync();
         btnCopy.Click += async (_, _) => await CopyAsync(confirm: true);
         tip.SetToolTip(btnAnalyze, "找出來源資料中，哪些已經在硬碟裡（只讀取，不會改動任何檔案）");
-        tip.SetToolTip(btnCopy, "把硬碟裡還沒有的照片複製到「_待整理」資料夾");
+        tip.SetToolTip(btnCopy, "把勾選的新照片複製到「_待整理」資料夾");
         btnNaming.AutoSize = false;
-        btnNaming.Size = new Size(110, 38);
-        btnNaming.Margin = new Padding(0, 0, 10, 0);
+        btnNaming.Size = new Size(110, 40);
+        btnNaming.Margin = new Padding(0);
         btnNaming.Click += (_, _) => EditNaming();
         UpdateNamingTip();
 
-        var progressArea = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 2,
-            Margin = new Padding(4, 0, 10, 0),
-            Height = 38,
-        };
-        progressArea.RowStyles.Add(new RowStyle(SizeType.Absolute, 12));
-        progressArea.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        progressBar.Dock = DockStyle.Fill;
+        // 右側：處理中顯示進度條與取消，完成後顯示狀態
+        var right = new Panel { Dock = DockStyle.Fill, Height = 40, Margin = new Padding(12, 0, 0, 0) };
+        progressArea.Dock = DockStyle.Fill;
+        progressArea.ColumnCount = 2;
+        progressArea.RowCount = 1;
+        progressArea.Margin = new Padding(0);
+        progressArea.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        progressArea.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        progressBar.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        progressBar.Height = 10;
         progressBar.Maximum = 1000;
-        progressBar.Margin = new Padding(0, 2, 0, 0);
-        lblStatus.Dock = DockStyle.Fill;
-        lblStatus.AutoEllipsis = true;
-        lblStatus.ForeColor = Theme.TextGray;
-        lblStatus.TextAlign = ContentAlignment.MiddleLeft;
-        lblStatus.Margin = new Padding(0);
-        progressArea.Controls.Add(progressBar, 0, 0);
-        progressArea.Controls.Add(lblStatus, 0, 1);
-
+        progressBar.Margin = new Padding(0, 0, 10, 0);
         btnCancel.AutoSize = false;
-        btnCancel.Size = new Size(90, 38);
+        btnCancel.Size = new Size(90, 36);
         btnCancel.Margin = new Padding(0);
+        btnCancel.Anchor = AnchorStyles.Right;
         btnCancel.Click += (_, _) =>
         {
             cts?.Cancel();
             lblStatus.Text = "正在取消…";
         };
+        progressArea.Controls.Add(progressBar, 0, 0);
+        progressArea.Controls.Add(btnCancel, 1, 0);
+        progressArea.Visible = false;
+        lblState.Dock = DockStyle.Fill;
+        lblState.Font = new Font(Theme.FontName, 10.5f);
+        right.Controls.Add(progressArea);
+        right.Controls.Add(lblState);
 
         row.Controls.Add(btnAnalyze, 0, 0);
         row.Controls.Add(btnCopy, 1, 0);
         row.Controls.Add(btnNaming, 2, 0);
-        row.Controls.Add(progressArea, 3, 0);
-        row.Controls.Add(btnCancel, 4, 0);
+        row.Controls.Add(right, 3, 0);
         return row;
     }
 
     private Control BuildResultsSection()
     {
         var section = new SectionPanel("比對結果",
-            "新照片：硬碟裡還沒有，按「複製新照片」會放進待整理資料夾。" + Environment.NewLine
+            "新照片：硬碟裡還沒有，按「複製新照片」會把勾選的照片放進待整理資料夾；取消勾選的不會複製。" + Environment.NewLine
             + "硬碟已有：內容和硬碟裡某個檔案完全相同（就算檔名不同也算），不會複製。" + Environment.NewLine
             + "曾遺失：以前用這個程式匯入過，但現在硬碟裡找不到（可能被刪除或搬走），會再複製一次補回來。" + Environment.NewLine
-            + "來源資料重複：同一張照片在來源資料裡出現好幾次，只會複製第一份；點一下張數可以看是哪些檔案。" + Environment.NewLine
+            + "來源資料重複：同一張照片在來源資料裡出現好幾次，只會複製第一份。" + Environment.NewLine
             + "比對看的是檔案內容，在 Google 相簿編輯或旋轉過的照片會被當成新照片。" + Environment.NewLine
             + "依「檔名規則」改名時，找不到拍攝時間的照片會在「硬碟中對應的檔案」欄註明日期從哪裡來。",
-            tip)
+            tip, large: true)
         {
             Dock = DockStyle.Fill,
             Margin = new Padding(0),
@@ -356,50 +414,76 @@ public sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 4,
         };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-        var summary = new FlowLayoutPanel
+        // 統計卡
+        tilesRow.Dock = DockStyle.Fill;
+        tilesRow.ColumnCount = 4;
+        tilesRow.RowCount = 1;
+        tilesRow.AutoSize = true;
+        tilesRow.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        tilesRow.Margin = new Padding(0, 0, 0, 6);
+        var tiles = new[] { tileNew, tileExisting, tileDuplicate, tileTotal };
+        var targets = new[] { FilterNew, FilterExisting, FilterDuplicate, FilterAll };
+        for (var i = 0; i < tiles.Length; i++)
+        {
+            tilesRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25));
+            var t = tiles[i];
+            var target = targets[i];
+            t.Dock = DockStyle.Fill;
+            t.Height = 62;
+            t.Margin = new Padding(i == 0 ? 0 : 6, 0, i == tiles.Length - 1 ? 0 : 6, 0);
+            t.Click += (_, _) =>
+            {
+                if (analysis is not null)
+                {
+                    tabs.SelectedIndex = target;
+                }
+            };
+            tilesRow.Controls.Add(t, i, 0);
+        }
+        tip.SetToolTip(tileNew, "硬碟裡還沒有的照片，點一下只列出這些");
+        tip.SetToolTip(tileExisting, "內容和硬碟裡某個檔案完全相同，不會複製");
+        tip.SetToolTip(tileDuplicate, "同一張照片在來源資料裡出現好幾次，只會複製第一份。點一下列出是哪些檔案");
+        tip.SetToolTip(tileTotal, "來源資料中的照片與影片總數");
+
+        // 分頁＋搜尋
+        var tabRow = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            WrapContents = true,
-            Margin = new Padding(0, 0, 0, 8),
+            Margin = new Padding(0, 4, 0, 8),
         };
-        lblNew.ForeColor = Theme.Teal;
-        lblNew.Font = new Font(Theme.FontName, 10.5f, FontStyle.Bold);
-        lblExisting.ForeColor = Theme.TextGray;
-        lblMissing.ForeColor = Theme.Amber;
-        lblMissing.Font = new Font(Theme.FontName, 10.5f, FontStyle.Bold);
-        lblDuplicate.ForeColor = Theme.Amber;
-        lblDuplicate.Font = new Font(Theme.FontName, 10.5f, FontStyle.Bold | FontStyle.Underline);
-        lblDuplicate.Cursor = Cursors.Hand;
-        lblDuplicate.Visible = false;
-        lblDuplicate.Click += (_, _) =>
-        {
-            if (cboFilter.Enabled)
-            {
-                cboFilter.SelectedIndex = FilterDuplicate;
-            }
-        };
-        tip.SetToolTip(lblDuplicate, "同一張照片在來源資料裡出現好幾次，只會複製第一份。點一下列出是哪些檔案。");
-        foreach (var l in new[] { lblNew, lblMissing, lblExisting, lblDuplicate })
-        {
-            l.AutoSize = true;
-            l.Margin = new Padding(0, 0, 28, 0);
-            summary.Controls.Add(l);
-        }
+        tabRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        tabRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        tabs.Dock = DockStyle.Fill;
+        tabs.Height = 36;
+        tabs.Margin = new Padding(0, 0, 12, 0);
+        tabs.Font = new Font(Theme.FontName, 10.5f);
+        tabs.SetTabs(new[] { "全部", "新照片", "曾遺失", "硬碟已有", "來源資料重複" });
+        tabs.SelectedIndexChanged += (_, _) => RefreshGrid();
+        search.Size = new Size(240, 34);
+        search.Anchor = AnchorStyles.Right;
+        search.Margin = new Padding(0);
+        search.TextChanged += (_, _) => RefreshGrid();
+        tabRow.Controls.Add(tabs, 0, 0);
+        tabRow.Controls.Add(search, 1, 0);
 
-        var gridHost = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0) };
+        var gridHost = new Panel { Dock = DockStyle.Fill, Margin = new Padding(0), Padding = new Padding(1), BackColor = Theme.CardBorder };
         SetupGrid();
         lblHint.Dock = DockStyle.Fill;
         lblHint.TextAlign = ContentAlignment.MiddleCenter;
         lblHint.ForeColor = Theme.TextGray;
-        lblHint.BackColor = Theme.Surface;
+        lblHint.BackColor = Theme.AccentSoft;
         gridHost.Controls.Add(grid);
         gridHost.Controls.Add(lblHint);
         lblHint.BringToFront();
@@ -407,47 +491,71 @@ public sealed class MainForm : Form
         var bottom = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 5,
+            ColumnCount = 3,
             RowCount = 1,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             Margin = new Padding(0, 10, 0, 0),
         };
-        bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        var lblFilter = new Label
-        {
-            Text = "顯示：",
-            AutoSize = true,
-            Anchor = AnchorStyles.Left,
-            Margin = new Padding(0, 0, 4, 0),
-        };
-        cboFilter.DropDownStyle = ComboBoxStyle.DropDownList;
-        cboFilter.Items.AddRange(new object[] { "全部", "新照片", "曾遺失", "硬碟已有", "來源資料重複" });
-        cboFilter.SelectedIndex = 0;
-        cboFilter.Width = 130;
-        cboFilter.Anchor = AnchorStyles.Left;
-        cboFilter.Margin = new Padding(0);
-        cboFilter.SelectedIndexChanged += (_, _) => RefreshGrid();
+        lblSelection.AutoSize = true;
+        lblSelection.Anchor = AnchorStyles.Left;
+        lblSelection.Margin = new Padding(0);
+        lblSelection.ForeColor = Theme.TextDark;
+        tip.SetToolTip(lblSelection, "按表格最左邊的方框勾選或取消；最上面的方框可以一次全選或全部取消。也可以選取多列後按空白鍵。");
         btnExport.Anchor = AnchorStyles.Right;
         btnOpenFolder.Anchor = AnchorStyles.Right;
         btnOpenFolder.Margin = new Padding(0);
         btnExport.Click += (_, _) => ExportCsv();
         btnOpenFolder.Click += (_, _) => OpenOutputFolder();
         tip.SetToolTip(btnExport, "把比對結果存成 CSV 檔，可用 Excel 開啟");
-        bottom.Controls.Add(lblFilter, 0, 0);
-        bottom.Controls.Add(cboFilter, 1, 0);
-        bottom.Controls.Add(btnExport, 3, 0);
-        bottom.Controls.Add(btnOpenFolder, 4, 0);
+        bottom.Controls.Add(lblSelection, 0, 0);
+        bottom.Controls.Add(btnExport, 1, 0);
+        bottom.Controls.Add(btnOpenFolder, 2, 0);
 
-        layout.Controls.Add(summary, 0, 0);
-        layout.Controls.Add(gridHost, 0, 1);
-        layout.Controls.Add(bottom, 0, 2);
+        layout.Controls.Add(tilesRow, 0, 0);
+        layout.Controls.Add(tabRow, 0, 1);
+        layout.Controls.Add(gridHost, 0, 2);
+        layout.Controls.Add(bottom, 0, 3);
         section.Controls.Add(layout);
         return section;
+    }
+
+    private Control BuildStatusBar()
+    {
+        statusBar.Dock = DockStyle.Bottom;
+        statusBar.Height = 30;
+        statusBar.BackColor = Theme.WindowBack;
+        statusBar.Padding = new Padding(36, 0, 18, 0);
+        statusBar.Paint += (_, e) =>
+        {
+            var g = e.Graphics;
+            using (var line = new Pen(Theme.CardBorder))
+            {
+                g.DrawLine(line, 0, 0, statusBar.Width, 0);
+            }
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            var d = Ui.Scaled(statusBar, 9);
+            using var b = new SolidBrush(busy ? Theme.Accent : statusColor);
+            g.FillEllipse(b, Ui.Scaled(statusBar, 20), (statusBar.Height - d) / 2, d, d);
+        };
+        lblStatus.Dock = DockStyle.Fill;
+        lblStatus.AutoEllipsis = true;
+        lblStatus.ForeColor = Theme.TextDark;
+        lblStatus.TextAlign = ContentAlignment.MiddleLeft;
+        lblStatus.Margin = new Padding(0);
+        lblStatus.TextChanged += (_, _) => tip.SetToolTip(lblStatus, lblStatus.Text);
+        statusBar.Controls.Add(lblStatus);
+        return statusBar;
+    }
+
+    /// <summary>狀態列左邊圓點的顏色：完成綠色、取消或失敗琥珀色、其他灰色（處理中固定主色）。</summary>
+    private void SetStatusColor(Color color)
+    {
+        statusColor = color;
+        statusBar.Invalidate();
     }
 
     private void SetupGrid()
@@ -462,20 +570,21 @@ public sealed class MainForm : Form
         grid.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
         grid.MultiSelect = true;
         grid.BackgroundColor = Color.White;
-        grid.BorderStyle = BorderStyle.FixedSingle;
+        grid.BorderStyle = BorderStyle.None;
         grid.GridColor = Theme.GridLine;
         grid.CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal;
         grid.EnableHeadersVisualStyles = false;
-        grid.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.None;
-        grid.ColumnHeadersDefaultCellStyle.BackColor = Theme.Primary;
-        grid.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
-        grid.ColumnHeadersDefaultCellStyle.SelectionBackColor = Theme.Primary;
+        grid.ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single;
+        grid.ColumnHeadersDefaultCellStyle.BackColor = Theme.TableHead;
+        grid.ColumnHeadersDefaultCellStyle.ForeColor = Theme.TextDark;
+        grid.ColumnHeadersDefaultCellStyle.SelectionBackColor = Theme.TableHead;
+        grid.ColumnHeadersDefaultCellStyle.SelectionForeColor = Theme.TextDark;
         grid.ColumnHeadersDefaultCellStyle.Font = new Font(Theme.FontName, 10f, FontStyle.Bold);
         grid.ColumnHeadersDefaultCellStyle.Padding = new Padding(4, 0, 0, 0);
         grid.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
-        grid.ColumnHeadersHeight = 32;
-        grid.RowTemplate.Height = 26;
-        grid.DefaultCellStyle.SelectionBackColor = ColorTranslator.FromHtml("#DCE4F0");
+        grid.ColumnHeadersHeight = 36;
+        grid.RowTemplate.Height = 34;
+        grid.DefaultCellStyle.SelectionBackColor = Theme.AccentLight;
         grid.DefaultCellStyle.SelectionForeColor = Theme.TextDark;
         grid.DefaultCellStyle.Padding = new Padding(4, 0, 4, 0);
         grid.AlternatingRowsDefaultCellStyle.BackColor = Theme.RowAlt;
@@ -497,16 +606,36 @@ public sealed class MainForm : Form
             }
             return c;
         }
-        grid.Columns.Add(Col("狀態", 130));
-        grid.Columns.Add(Col("檔名", 200, true, 90));
+        var check = Col("", 40);
+        check.MinimumWidth = 40;
+        check.Resizable = DataGridViewTriState.False;
+        grid.Columns.Add(check);
+        grid.Columns.Add(Col("檔案名稱", 200, true, 90));
+        grid.Columns.Add(Col("來源資料中的位置", 200, true, 100));
         var sizeCol = Col("大小", 90);
         sizeCol.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
         grid.Columns.Add(sizeCol);
-        grid.Columns.Add(Col("來源資料中的位置", 200, true, 110));
+        grid.Columns.Add(Col("狀態", 120));
         grid.Columns.Add(Col("硬碟中對應的檔案", 200, true, 120));
 
         grid.CellValueNeeded += Grid_CellValueNeeded;
-        grid.CellFormatting += Grid_CellFormatting;
+        grid.CellPainting += Grid_CellPainting;
+        grid.CellMouseClick += Grid_CellMouseClick;
+        grid.CellToolTipTextNeeded += (_, e) =>
+        {
+            if (e.ColumnIndex == ColCheck)
+            {
+                e.ToolTipText = e.RowIndex < 0 ? "全選或全部取消（目前列出的新照片）" : "勾選的新照片才會複製";
+            }
+        };
+        grid.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode == Keys.Space)
+            {
+                ToggleRows(grid.SelectedRows.Cast<DataGridViewRow>().Select(r => r.Index));
+                e.Handled = true;
+            }
+        };
     }
 
     protected override void OnShown(EventArgs e)
@@ -529,9 +658,32 @@ public sealed class MainForm : Form
         {
             WindowState = FormWindowState.Maximized;
         }
+        UpdateCompactLayout();
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        UpdateCompactLayout();
+    }
+
+    /// <summary>視窗矮（例如 1366×768 加上 125% 縮放）時收起統計卡，把高度留給表格；分頁上仍有數量。最小化時不動。</summary>
+    private void UpdateCompactLayout()
+    {
+        if (WindowState == FormWindowState.Minimized || ClientSize.Height <= 0)
+        {
+            return;
+        }
+        var compact = ClientSize.Height < Ui.Scaled(this, 700);
+        if (tilesRow.Visible == compact)
+        {
+            tilesRow.Visible = !compact;
+        }
     }
 
     // ================================================================ 表格
+
+    private static bool IsSelectable(SourceItem it) => it.Status == ItemStatus.New && it.CopiedTo is null;
 
     private void Grid_CellValueNeeded(object? sender, DataGridViewCellValueEventArgs e)
     {
@@ -542,33 +694,164 @@ public sealed class MainForm : Form
         var it = view[e.RowIndex];
         e.Value = e.ColumnIndex switch
         {
-            0 => StatusText(it),
-            1 => it.FileName,
-            2 => DedupEngine.FormatSize(it.Size),
-            3 => it.Location,
-            4 => MatchText(it),
+            ColName => it.FileName,
+            ColLocation => it.Location,
+            ColSize => DedupEngine.FormatSize(it.Size),
+            ColStatus => StatusText(it),
+            ColMatch => MatchText(it),
             _ => null,
         };
     }
 
-    private void Grid_CellFormatting(object? sender, DataGridViewCellFormattingEventArgs e)
+    private void Grid_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
     {
-        if (e.ColumnIndex != 0 || e.RowIndex < 0 || e.RowIndex >= view.Count || e.CellStyle is null)
+        if (e.Graphics is null || (e.ColumnIndex != ColCheck && e.ColumnIndex != ColStatus))
         {
             return;
         }
-        var it = view[e.RowIndex];
-        e.CellStyle.ForeColor = it.Status switch
+        if (e.RowIndex >= view.Count)
         {
-            ItemStatus.New when it.IsMissingBefore => Theme.Amber,
-            ItemStatus.New => Theme.Teal,
-            _ => Theme.TextGray,
-        };
-        e.CellStyle.SelectionForeColor = e.CellStyle.ForeColor;
-        if (it.Status == ItemStatus.New)
-        {
-            e.CellStyle.Font = boldCellFont;
+            return;
         }
+        var g = e.Graphics;
+        e.Paint(e.ClipBounds, DataGridViewPaintParts.Background | DataGridViewPaintParts.Border | DataGridViewPaintParts.SelectionBackground);
+        var b = e.CellBounds;
+        if (e.ColumnIndex == ColCheck)
+        {
+            bool? state;
+            if (e.RowIndex < 0)
+            {
+                var eligible = view.Where(IsSelectable).ToList();
+                if (eligible.Count == 0)
+                {
+                    e.Handled = true;
+                    return;
+                }
+                var on = eligible.Count(i => !i.Excluded);
+                state = on == eligible.Count ? true : on == 0 ? false : null;
+            }
+            else
+            {
+                var it = view[e.RowIndex];
+                if (!IsSelectable(it))
+                {
+                    e.Handled = true;
+                    return;
+                }
+                state = !it.Excluded;
+            }
+            var s = Ui.Scaled(grid, 16);
+            Glyphs.CheckBox(g, new Rectangle(b.Left + (b.Width - s) / 2, b.Top + (b.Height - s) / 2, s, s), state, grid);
+        }
+        else if (e.RowIndex >= 0)
+        {
+            var it = view[e.RowIndex];
+            var text = StatusText(it);
+            var (back, fore) = it.Status switch
+            {
+                ItemStatus.New when it.CopiedTo is not null => (Theme.SuccessLight, Theme.SuccessText),
+                ItemStatus.New when it.IsMissingBefore => (Theme.AmberLight, Theme.Amber),
+                ItemStatus.New => (Theme.AccentLight, Theme.Accent),
+                ItemStatus.AlreadyBackedUp => (Theme.Surface, Theme.TextGray),
+                _ => (Theme.AmberLight, Theme.Amber),
+            };
+            if ((e.State & DataGridViewElementStates.Selected) != 0 && back == Theme.AccentLight)
+            {
+                back = Color.White; // 選取列的底色和「新照片」標籤同色，改白底才看得出來
+            }
+            var size = TextRenderer.MeasureText(g, text, pillFont, Size.Empty, TextFormatFlags.NoPadding);
+            var h = size.Height + Ui.Scaled(grid, 8);
+            var pill = new Rectangle(b.Left + Ui.Scaled(grid, 8), b.Top + (b.Height - h) / 2, size.Width + Ui.Scaled(grid, 18), h);
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using (var path = SectionPanel.RoundedRect(pill, Ui.Scaled(grid, 6)))
+            using (var brush = new SolidBrush(back))
+            {
+                g.FillPath(brush, path);
+            }
+            TextRenderer.DrawText(g, text, pillFont, pill, fore,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        }
+        else
+        {
+            e.Paint(e.ClipBounds, DataGridViewPaintParts.ContentForeground);
+        }
+        e.Handled = true;
+    }
+
+    private void Grid_CellMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
+    {
+        if (e.ColumnIndex != ColCheck || e.Button != MouseButtons.Left || busy)
+        {
+            return;
+        }
+        if (e.RowIndex < 0)
+        {
+            var eligible = view.Where(IsSelectable).ToList();
+            var check = eligible.Any(i => i.Excluded);
+            foreach (var it in eligible)
+            {
+                it.Excluded = !check;
+            }
+            AfterSelectionChanged();
+        }
+        else
+        {
+            ToggleRows(new[] { e.RowIndex });
+        }
+    }
+
+    /// <summary>切換多列的勾選：以第一個可勾選的列為準，全部改成相反狀態。</summary>
+    private void ToggleRows(IEnumerable<int> rows)
+    {
+        if (busy)
+        {
+            return;
+        }
+        var items = rows.Where(r => r >= 0 && r < view.Count).Select(r => view[r]).Where(IsSelectable).ToList();
+        if (items.Count == 0)
+        {
+            return;
+        }
+        var newExcluded = !items[0].Excluded;
+        foreach (var it in items)
+        {
+            it.Excluded = newExcluded;
+        }
+        AfterSelectionChanged();
+    }
+
+    private void AfterSelectionChanged()
+    {
+        grid.Invalidate();
+        UpdateSelectionLabel();
+        UpdateButtons();
+    }
+
+    internal void SetChecked(int row, bool isChecked)
+    {
+        if (row >= 0 && row < view.Count && IsSelectable(view[row]))
+        {
+            view[row].Excluded = !isChecked;
+            AfterSelectionChanged();
+        }
+    }
+
+    private void UpdateSelectionLabel()
+    {
+        if (analysis is null)
+        {
+            lblSelection.Text = "";
+            return;
+        }
+        var pending = analysis.Items.Where(IsSelectable).ToList();
+        var on = pending.Where(i => !i.Excluded).ToList();
+        if (pending.Count == 0)
+        {
+            lblSelection.Text = analysis.Items.Any(i => i.CopiedTo is not null) ? "新照片都已複製完成" : "沒有需要複製的照片";
+            return;
+        }
+        lblSelection.Text = $"已勾選 {on.Count:N0} 張新照片（{DedupEngine.FormatSize(on.Sum(i => i.Size))}）"
+            + (on.Count < pending.Count ? $"，{pending.Count - on.Count:N0} 張未勾選不會複製" : "");
     }
 
     private static string StatusText(SourceItem it) => it.Status switch
@@ -590,6 +873,7 @@ public sealed class MainForm : Form
                 + (it.NameNote is null ? "" : "（" + it.NameNote + "）"),
             ItemStatus.New when it.PreviousImport is { } prev =>
                 $"{prev.ImportedAt:yyyy-MM-dd} 曾匯入到 {prev.RelativePath}，現在硬碟裡找不到",
+            ItemStatus.New when it.Excluded => "未勾選，不會複製",
             _ => "",
         };
     }
@@ -612,12 +896,18 @@ public sealed class MainForm : Form
             view = new List<SourceItem>();
             return;
         }
-        var all = analysis.Items;
-        view = cboFilter.SelectedIndex switch
+        IEnumerable<SourceItem> all = analysis.Items;
+        var keyword = search.Text.Trim();
+        if (keyword.Length > 0)
         {
-            1 => all.Where(i => i.Status == ItemStatus.New).OrderBy(i => i.IsMissingBefore ? 0 : 1).ToList(),
-            2 => all.Where(i => i.IsMissingBefore).ToList(),
-            3 => all.Where(i => i.Status == ItemStatus.AlreadyBackedUp).ToList(),
+            all = all.Where(i => i.FileName.Contains(keyword, StringComparison.OrdinalIgnoreCase)
+                                 || i.Location.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+        }
+        view = tabs.SelectedIndex switch
+        {
+            FilterNew => all.Where(i => i.Status == ItemStatus.New).OrderBy(i => i.IsMissingBefore ? 0 : 1).ToList(),
+            FilterMissing => all.Where(i => i.IsMissingBefore).ToList(),
+            FilterExisting => all.Where(i => i.Status == ItemStatus.AlreadyBackedUp).ToList(),
             // 同一張照片的重複檔排在一起
             FilterDuplicate => all.Where(i => i.Status == ItemStatus.DuplicateInBatch)
                 .OrderBy(i => i.MatchedWith, StringComparer.OrdinalIgnoreCase).ToList(),
@@ -631,24 +921,51 @@ public sealed class MainForm : Form
         };
         grid.RowCount = view.Count;
         grid.Invalidate();
+        if (analysis.Items.Count > 0)
+        {
+            lblHint.Visible = view.Count == 0;
+            lblHint.Text = keyword.Length > 0 ? $"沒有檔名包含「{keyword}」的項目" : "這個分頁沒有項目";
+        }
     }
-
-    private const int FilterDuplicate = 4;
 
     private void ResetResults()
     {
         analysis = null;
         lastOutputFolder = null;
         RefreshGrid();
-        lblNew.Text = "新照片：－";
-        lblExisting.Text = "硬碟已有：－";
-        lblMissing.Visible = false;
-        lblDuplicate.Visible = false;
-        lblHint.Text = "選好備份資料夾、加入來源資料後，按「① 開始比對」";
+        tileNew.SetValues("－", "");
+        tileExisting.SetValues("－", "");
+        tileDuplicate.SetValues("－", "");
+        tileTotal.SetValues("－", "");
+        SetDuplicateTileVisible(false);
+        tabs.SetTab(FilterAll, "全部", true);
+        tabs.SetTab(FilterNew, "新照片", true);
+        tabs.SetTab(FilterMissing, "曾遺失", false);
+        tabs.SetTab(FilterExisting, "硬碟已有", true);
+        tabs.SetTab(FilterDuplicate, "來源資料重複", false);
+        tabs.SelectedIndex = FilterAll;
+        lblHint.Text = "選好備份位置、加入來源資料後，按「開始比對」";
         lblHint.Visible = true;
+        lblSelection.Text = "";
+        lblState.Text = "";
         progressBar.Style = ProgressBarStyle.Continuous;
         progressBar.Value = 0;
         lblStatus.Text = "";
+        SetStatusColor(Theme.TextGray);
+    }
+
+    private bool duplicateTileShown;
+
+    /// <summary>顯示或隱藏「來源資料重複」統計卡，其他卡平分寬度（視窗顯示前 Control.Visible 一律是 false，所以自己記錄）。</summary>
+    private void SetDuplicateTileVisible(bool visible)
+    {
+        duplicateTileShown = visible;
+        tileDuplicate.Visible = visible;
+        var shown = visible ? 4 : 3;
+        for (var i = 0; i < tilesRow.ColumnStyles.Count; i++)
+        {
+            tilesRow.ColumnStyles[i].Width = i == 2 && !visible ? 0 : 100f / shown;
+        }
     }
 
     private void ShowSummary()
@@ -659,18 +976,28 @@ public sealed class MainForm : Form
         }
         var newCount = analysis.Count(ItemStatus.New);
         var copied = analysis.Items.Count(i => i.CopiedTo is not null);
-        lblNew.Text = copied > 0
-            ? $"新照片：{newCount:N0} 張（已複製 {copied:N0} 張）"
-            : $"新照片：{newCount:N0} 張（{DedupEngine.FormatSize(analysis.Bytes(ItemStatus.New))}）";
-        lblExisting.Text = $"硬碟已有：{analysis.Count(ItemStatus.AlreadyBackedUp):N0} 張";
         var missing = analysis.Items.Count(i => i.IsMissingBefore);
-        lblMissing.Text = $"其中曾遺失：{missing:N0} 張";
-        lblMissing.Visible = missing > 0;
+        var existing = analysis.Count(ItemStatus.AlreadyBackedUp);
         var duplicates = analysis.Count(ItemStatus.DuplicateInBatch);
-        lblDuplicate.Text = $"來源資料重複：{duplicates:N0} 張（只複製一份）";
-        lblDuplicate.Visible = duplicates > 0;
-        lblHint.Visible = analysis.Items.Count == 0;
-        lblHint.Text = "來源資料裡沒有找到任何照片或影片";
+        var detail = copied > 0
+            ? $"已複製 {copied:N0} 張"
+            : DedupEngine.FormatSize(analysis.Bytes(ItemStatus.New)) + (missing > 0 ? $"，其中 {missing:N0} 張曾遺失" : "");
+        tileNew.SetValues(newCount.ToString("N0"), detail);
+        tileExisting.SetValues(existing.ToString("N0"), "內容相同，不會複製");
+        tileDuplicate.SetValues(duplicates.ToString("N0"), "只複製一份，點一下查看");
+        SetDuplicateTileVisible(duplicates > 0);
+        tileTotal.SetValues(analysis.Items.Count.ToString("N0"), "照片與影片");
+        tabs.SetTab(FilterAll, $"全部 {analysis.Items.Count:N0}", true);
+        tabs.SetTab(FilterNew, $"新照片 {newCount:N0}", true);
+        tabs.SetTab(FilterMissing, $"曾遺失 {missing:N0}", missing > 0);
+        tabs.SetTab(FilterExisting, $"硬碟已有 {existing:N0}", true);
+        tabs.SetTab(FilterDuplicate, $"來源資料重複 {duplicates:N0}", duplicates > 0);
+        lblHint.Visible = analysis.Items.Count == 0 || view.Count == 0;
+        if (analysis.Items.Count == 0)
+        {
+            lblHint.Text = "來源資料裡沒有找到任何照片或影片";
+        }
+        UpdateSelectionLabel();
         grid.Invalidate();
     }
 
@@ -809,38 +1136,37 @@ public sealed class MainForm : Form
 
     internal void AddSources(IEnumerable<string> paths)
     {
-        var existing = lstSources.Items.Cast<string>().ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var list = lstSources.Paths.ToList();
+        var existing = list.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var alreadyListed = new List<string>();
         foreach (var p in paths)
         {
             if (existing.Add(p))
             {
-                lstSources.Items.Add(p);
+                list.Add(p);
             }
             else
             {
                 alreadyListed.Add(Path.GetFileName(Path.TrimEndingDirectorySeparator(p)));
             }
         }
+        lstSources.SetPaths(list);
         OnInputsChanged();
         if (alreadyListed.Count > 0)
         {
             // 清單看起來沒變，要明確告訴使用者發生了什麼
             var names = string.Join("、", alreadyListed.Take(3)) + (alreadyListed.Count > 3 ? " 等" : "");
-            lblStatus.Text = $"「{names}」已經在清單中，請按「① 開始比對」重新比對。";
+            lblStatus.Text = $"「{names}」已經在清單中，請按「開始比對」重新比對。";
         }
     }
 
-    private void RemoveSelectedSources()
+    internal void RemoveSource(string path)
     {
         if (busy)
         {
             return;
         }
-        foreach (var item in lstSources.SelectedItems.Cast<string>().ToList())
-        {
-            lstSources.Items.Remove(item);
-        }
+        lstSources.SetPaths(lstSources.Paths.Where(p => !string.Equals(p, path, StringComparison.OrdinalIgnoreCase)).ToList());
         OnInputsChanged();
     }
 
@@ -850,24 +1176,32 @@ public sealed class MainForm : Form
         {
             ResetResults();
         }
+        UpdateSourcesBadge();
         UpdateButtons();
+    }
+
+    private void UpdateSourcesBadge()
+    {
+        var n = lstSources.Paths.Count;
+        sourcesCard.Badge = n > 0 ? $"{n} 個項目" : null;
     }
 
     private void UpdateButtons()
     {
-        var ready = Directory.Exists(txtBackup.Text) && lstSources.Items.Count > 0;
+        var ready = Directory.Exists(txtBackup.Text) && lstSources.Paths.Count > 0;
         btnBrowseBackup.Enabled = !busy;
         btnAdd.Enabled = !busy;
         btnNaming.Enabled = !busy;
-        btnRemove.Enabled = !busy && lstSources.SelectedItems.Count > 0;
         btnAnalyze.Enabled = !busy && ready;
-        btnCopy.Enabled = !busy && analysis is not null
-            && analysis.Items.Any(i => i.Status == ItemStatus.New && i.CopiedTo is null);
+        var selected = analysis?.Items.Count(i => IsSelectable(i) && !i.Excluded) ?? 0;
+        btnCopy.Enabled = !busy && selected > 0;
+        btnCopy.Text = selected > 0 ? $"複製新照片（{selected:N0}）" : "複製新照片";
         btnCancel.Enabled = busy;
-        btnCancel.Visible = busy;
+        progressArea.Visible = busy;
+        lblState.Visible = !busy;
         btnExport.Enabled = !busy && analysis is not null && analysis.Items.Count > 0;
         btnOpenFolder.Enabled = lastOutputFolder is not null && Directory.Exists(lastOutputFolder);
-        cboFilter.Enabled = analysis is not null;
+
         btnUpdate.Enabled = !busy;
         btnSkipUpdate.Enabled = !busy;
     }
@@ -931,6 +1265,7 @@ public sealed class MainForm : Form
         busy = value;
         lstSources.Enabled = !value;
         UpdateButtons();
+        statusBar.Invalidate();
         UseWaitCursor = false;
     }
 
@@ -941,7 +1276,7 @@ public sealed class MainForm : Form
             return;
         }
         var backup = txtBackup.Text;
-        var sources = lstSources.Items.Cast<string>().ToList();
+        var sources = lstSources.Paths.ToList();
         ResetResults();
         lblHint.Text = "比對中…";
         SetBusy(true);
@@ -952,7 +1287,7 @@ public sealed class MainForm : Form
         {
             var result = await Task.Run(() => DedupEngine.Analyze(backup, sources, progress, token));
             analysis = result;
-            cboFilter.SelectedIndex = 0;
+            tabs.SelectedIndex = FilterAll;
             RefreshGrid();
             ShowSummary();
             progressBar.Style = ProgressBarStyle.Continuous;
@@ -960,7 +1295,7 @@ public sealed class MainForm : Form
             var newCount = result.Count(ItemStatus.New);
             var missingCount = result.Items.Count(i => i.IsMissingBefore);
             var status = newCount > 0
-                ? $"比對完成：找到 {newCount:N0} 張新照片，按「② 複製新照片」放進硬碟。"
+                ? $"比對完成：找到 {newCount:N0} 張新照片，按「複製新照片」放進硬碟。"
                 : "比對完成：來源資料裡的照片硬碟都已經有了，不需要複製。";
             if (missingCount > 0)
             {
@@ -976,6 +1311,9 @@ public sealed class MainForm : Form
                 status += "（無法寫入快取檔，下次比對會比較慢）";
             }
             lblStatus.Text = status;
+            lblState.Text = "比對完成";
+            SetStatusColor(Theme.Success);
+            UpdateButtons();
             if (duplicateCount > 0 && ShowDuplicateDialog)
             {
                 MessageBox.Show(this, DuplicateMessage(result), AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -993,17 +1331,20 @@ public sealed class MainForm : Form
         {
             ResetResults();
             lblStatus.Text = "已取消比對。";
+            SetStatusColor(Theme.Amber);
         }
         catch (UserFacingException ex)
         {
             ResetResults();
             lblStatus.Text = "比對失敗。";
+            SetStatusColor(Theme.Amber);
             MessageBox.Show(this, ex.Message, AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             ResetResults();
             lblStatus.Text = "比對失敗。";
+            SetStatusColor(Theme.Amber);
             MessageBox.Show(this, "讀取檔案時發生錯誤：" + Environment.NewLine + ex.Message
                 + Environment.NewLine + Environment.NewLine + "請確認外接硬碟沒有被拔除。",
                 AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -1020,7 +1361,8 @@ public sealed class MainForm : Form
         {
             return;
         }
-        var pending = analysis.Items.Where(i => i.Status == ItemStatus.New && i.CopiedTo is null).ToList();
+        var pending = analysis.Items.Where(i => IsSelectable(i) && !i.Excluded).ToList();
+        var unchecked_ = analysis.Items.Count(i => IsSelectable(i) && i.Excluded);
         if (pending.Count == 0)
         {
             return;
@@ -1030,8 +1372,9 @@ public sealed class MainForm : Form
         if (confirm)
         {
             var answer = MessageBox.Show(this,
-                $"要把 {pending.Count:N0} 張新照片（{DedupEngine.FormatSize(pending.Sum(i => i.Size))}）複製到：" + Environment.NewLine
+                $"要把 {pending.Count:N0} 張勾選的新照片（{DedupEngine.FormatSize(pending.Sum(i => i.Size))}）複製到：" + Environment.NewLine
                 + outDir + Environment.NewLine + Environment.NewLine
+                + (unchecked_ > 0 ? $"另外 {unchecked_:N0} 張未勾選，這次不會複製。" + Environment.NewLine : "")
                 + (pending.Any(i => i.IsMissingBefore)
                     ? $"其中 {pending.Count(i => i.IsMissingBefore):N0} 張是以前匯入過、現在找不到的照片，會一起補回來。" + Environment.NewLine
                     : "")
@@ -1058,6 +1401,8 @@ public sealed class MainForm : Form
             lastOutputFolder = summary.OutputFolder;
             FillProgressBar();
             lblStatus.Text = $"完成：已複製 {summary.Copied:N0} 張（{DedupEngine.FormatSize(summary.Bytes)}）到 {summary.OutputFolder}";
+            lblState.Text = "複製完成";
+            SetStatusColor(Theme.Success);
             ShowSummary(); // 先更新清單再跳提示，提示開著時清單才不會停在複製前的狀態
             if (ShowCopyDoneDialog)
             {
@@ -1068,17 +1413,20 @@ public sealed class MainForm : Form
         }
         catch (OperationCanceledException)
         {
-            lblStatus.Text = "已取消複製。已經複製完成的照片會保留，再按一次「② 複製新照片」會繼續複製剩下的。";
+            lblStatus.Text = "已取消複製。已經複製完成的照片會保留，再按一次「複製新照片」會繼續複製剩下的。";
+            SetStatusColor(Theme.Amber);
             lastOutputFolder = outDir;
         }
         catch (UserFacingException ex)
         {
             lblStatus.Text = "複製失敗。";
+            SetStatusColor(Theme.Amber);
             MessageBox.Show(this, ex.Message, AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             lblStatus.Text = "複製失敗。";
+            SetStatusColor(Theme.Amber);
             lastOutputFolder = outDir;
             MessageBox.Show(this, "複製時發生錯誤：" + Environment.NewLine + ex.Message
                 + Environment.NewLine + Environment.NewLine + "請確認外接硬碟沒有被拔除、空間足夠。已經複製完成的照片會保留。",
@@ -1126,7 +1474,7 @@ public sealed class MainForm : Form
         updateBar.Dock = DockStyle.Top;
         updateBar.AutoSize = true;
         updateBar.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        updateBar.BackColor = Theme.UpdateBack;
+        updateBar.BackColor = Theme.AccentLight;
         updateBar.Padding = new Padding(20, 6, 16, 6);
         updateBar.Visible = false;
         var row = new TableLayoutPanel
@@ -1136,7 +1484,7 @@ public sealed class MainForm : Form
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 4,
             RowCount = 1,
-            BackColor = Theme.UpdateBack,
+            BackColor = Theme.AccentLight,
         };
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -1145,14 +1493,14 @@ public sealed class MainForm : Form
         lblUpdate.Dock = DockStyle.Fill;
         lblUpdate.AutoEllipsis = true;
         lblUpdate.TextAlign = ContentAlignment.MiddleLeft;
-        lblUpdate.ForeColor = Theme.Teal;
+        lblUpdate.ForeColor = Theme.Accent;
         lblUpdate.Font = new Font(Theme.FontName, 10f, FontStyle.Bold);
         lblUpdate.Margin = new Padding(0);
         lnkUpdateNotes.Text = "更新內容";
         lnkUpdateNotes.AutoSize = true;
         lnkUpdateNotes.Anchor = AnchorStyles.Left;
-        lnkUpdateNotes.LinkColor = Theme.Teal;
-        lnkUpdateNotes.ActiveLinkColor = Theme.TealHover;
+        lnkUpdateNotes.LinkColor = Theme.Accent;
+        lnkUpdateNotes.ActiveLinkColor = Theme.AccentHover;
         lnkUpdateNotes.Margin = new Padding(8, 0, 12, 0);
         lnkUpdateNotes.LinkClicked += (_, _) => ShowUpdateNotes();
         foreach (var b in new[] { btnUpdate, btnSkipUpdate })
@@ -1356,11 +1704,12 @@ public sealed class MainForm : Form
         try
         {
             using var w = new StreamWriter(dlg.FileName, false, new UTF8Encoding(true));
-            w.WriteLine("狀態,檔名,大小(位元組),來源資料中的位置,硬碟中對應的檔案");
+            w.WriteLine("狀態,勾選,檔名,大小(位元組),來源資料中的位置,硬碟中對應的檔案");
             foreach (var it in analysis.Items)
             {
                 w.WriteLine(string.Join(",",
-                    Csv(StatusText(it)), Csv(it.FileName), it.Size.ToString(), Csv(it.Location), Csv(MatchText(it))));
+                    Csv(StatusText(it)), IsSelectable(it) ? (it.Excluded ? "否" : "是") : "", Csv(it.FileName), it.Size.ToString(),
+                    Csv(it.Location), Csv(MatchText(it))));
             }
             lblStatus.Text = "已匯出：" + dlg.FileName;
         }
@@ -1398,7 +1747,7 @@ public sealed class MainForm : Form
             sb.AppendLine($"…另外 {groups.Count - MaxGroups:N0} 組");
         }
         sb.AppendLine();
-        sb.Append("完整清單：下方「顯示」選「來源資料重複」，或按「匯出清單…」存成 Excel 可開的檔案。");
+        sb.Append("完整清單：點「來源資料重複」分頁，或按「匯出清單…」存成 Excel 可開的檔案。");
         return sb.ToString();
     }
 
@@ -1420,9 +1769,17 @@ public sealed class MainForm : Form
     /// <summary>介面測試時關掉複製完成的提示視窗。</summary>
     internal bool ShowCopyDoneDialog { get; set; } = true;
 
-    internal string DuplicateLabelText => lblDuplicate.Visible ? lblDuplicate.Text : "";
+    internal string DuplicateLabelText => analysis is not null && duplicateTileShown
+        ? $"來源資料重複：{analysis.Count(ItemStatus.DuplicateInBatch):N0} 張（只複製一份）"
+        : "";
 
-    internal void SelectFilter(int index) => cboFilter.SelectedIndex = index;
+    internal void SelectFilter(int index) => tabs.SelectedIndex = index;
+
+    internal void SetSearch(string text) => search.Text = text;
+
+    internal string SelectionText => lblSelection.Text;
+
+    internal string CopyButtonText => btnCopy.Text;
 
     internal string StatusLine => lblStatus.Text;
 

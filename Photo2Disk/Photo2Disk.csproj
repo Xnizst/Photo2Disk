@@ -8,7 +8,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Photo2Disk</RootNamespace>
     <AssemblyName>照片備份過濾工具</AssemblyName>
-    <Version>1.2.1</Version>
+    <Version>1.3.0</Version>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <Product>照片備份過濾工具</Product>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>

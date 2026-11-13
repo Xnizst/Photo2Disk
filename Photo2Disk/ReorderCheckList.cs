@@ -264,7 +264,7 @@ internal sealed class ReorderCheckList : Control
             var dimmed = dragging && i == pressIndex;
             if (i == selectedIndex)
             {
-                using var sel = new SolidBrush(dimmed ? Theme.Surface : Theme.HeaderSub);
+                using var sel = new SolidBrush(dimmed ? Theme.Surface : Theme.AccentLight);
                 g.FillRectangle(sel, r);
             }
 
@@ -275,7 +275,7 @@ internal sealed class ReorderCheckList : Control
             {
                 if (items[i].Checked)
                 {
-                    using var fill = new SolidBrush(Enabled ? Theme.Teal : Theme.TealDisabled);
+                    using var fill = new SolidBrush(Enabled ? Theme.Accent : Theme.AccentDisabled);
                     g.FillPath(fill, path);
                     using var pen = new Pen(Color.White, Math.Max(1.5f, S(2))) { StartCap = LineCap.Round, EndCap = LineCap.Round };
                     g.DrawLines(pen, new[]
@@ -319,14 +319,14 @@ internal sealed class ReorderCheckList : Control
             var y = 1 + insertIndex * row;
             var d = S(8);
             y = Math.Clamp(y, d / 2 + 2, Height - d / 2 - 3); // 最上、最下時往內縮，不和外框疊在一起
-            using var pen = new Pen(Theme.Teal, Math.Max(3f, S(3)));
+            using var pen = new Pen(Theme.Accent, Math.Max(3f, S(3)));
             g.DrawLine(pen, S(4) + d / 2, y, Width - S(4) - d / 2, y);
-            using var brush = new SolidBrush(Theme.Teal);
+            using var brush = new SolidBrush(Theme.Accent);
             g.FillEllipse(brush, S(4), y - d / 2, d, d);
             g.FillEllipse(brush, Width - S(4) - d, y - d / 2, d, d);
         }
 
-        using (var border = new Pen(Focused ? Theme.Primary : Theme.Border))
+        using (var border = new Pen(Focused ? Theme.Accent : Theme.Border))
         {
             g.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
         }

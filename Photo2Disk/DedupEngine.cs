@@ -28,6 +28,9 @@ public sealed class SourceItem
     public string? MatchedWith { get; set; }
     public string? CopiedTo { get; set; }
 
+    /// <summary>使用者在清單中取消勾選（只對新照片有意義），複製時略過。</summary>
+    public bool Excluded { get; set; }
+
     /// <summary>複製時讀到的拍攝資訊（檔名規則用到日期、型號或流水號時才讀）。</summary>
     public MediaInfo? Media { get; set; }
 
@@ -264,7 +267,7 @@ public static class DedupEngine
         NamingOptions? naming = null)
     {
         naming ??= new NamingOptions();
-        var toCopy = analysis.Items.Where(i => i.Status == ItemStatus.New && i.CopiedTo is null).ToList();
+        var toCopy = analysis.Items.Where(i => i.Status == ItemStatus.New && i.CopiedTo is null && !i.Excluded).ToList();
         var outDir = GetStagingFolder(analysis.BackupRoot, DateTime.Now);
         var summary = new CopySummary { OutputFolder = outDir };
         if (toCopy.Count == 0)

@@ -1,6 +1,7 @@
 """產生程式圖示。
 
-用法（在專案根目錄）：python tools/make_icon.py [樣式]
+用法（在專案根目錄）：python tools/make_icon.py --from tools/icon_source.png（目前使用，2026-11-13 改用 GPT 產生的漏斗圖示）
+或 python tools/make_icon.py [樣式]（舊的自繪圖示）
 樣式：A（預設）、B、C；加 --preview 時三種都畫成一張比較圖到 tools/icon_preview.png。
 輸出：Photo2Disk/app.ico（16、20、24、32、40、48、64、128、256 像素）。
 以 1024 像素畫好再縮小；16～32 像素另外加粗線條，避免縮小後糊掉。
@@ -120,8 +121,37 @@ def preview() -> Path:
     return out
 
 
+def build_ico_from_png(src: Path) -> Path:
+    """由外部提供的 PNG 產生圖示：清掉幾乎透明的雜點、裁到內容範圍、置中成正方形。"""
+    im = Image.open(src).convert("RGBA")
+    alpha = im.getchannel("A").point(lambda v: 0 if v <= 24 else v)
+    im.putalpha(alpha)
+    im = im.crop(alpha.getbbox())
+    side = int(max(im.size) * 1.04)
+    square = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+    square.alpha_composite(im, ((side - im.width) // 2, (side - im.height) // 2))
+    frames = []
+    for n in SIZES:
+        f = square.resize((n, n), Image.LANCZOS)
+        if n <= 32:
+            # 小尺寸邊緣半透明處拉高對比，避免糊成一團
+            f.putalpha(f.getchannel("A").point(lambda v: 0 if v < 40 else min(255, int(v * 1.3))))
+        frames.append(f)
+    out = ROOT / "Photo2Disk" / "app.ico"
+    frames[-1].save(out, format="ICO", sizes=[(n, n) for n in SIZES], append_images=frames[:-1])
+    sheet = Image.new("RGBA", (sum(SIZES) + 20 * len(SIZES) + 20, 300), (240, 240, 240, 255))
+    x = 20
+    for n, f in zip(SIZES, frames):
+        sheet.alpha_composite(f, (x, (300 - n) // 2))
+        x += n + 20
+    sheet.save(ROOT / "tools" / "icon_preview.png")
+    return out
+
+
 if __name__ == "__main__":
-    if "--preview" in sys.argv:
+    if "--from" in sys.argv:
+        print("成功：", build_ico_from_png(Path(sys.argv[sys.argv.index("--from") + 1])))
+    elif "--preview" in sys.argv:
         print("成功：", preview())
     else:
         style = next((a for a in sys.argv[1:] if a in ("A", "B", "C")), "A")

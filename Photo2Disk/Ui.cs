@@ -2,22 +2,31 @@ using System.Drawing.Drawing2D;
 
 namespace Photo2Disk;
 
-/// <summary>集中定義顏色與字型。</summary>
+/// <summary>集中定義顏色與字型（2026-11-13 改用 GPT 設計稿的亮藍色系）。</summary>
 internal static class Theme
 {
-    public static readonly Color Primary = ColorTranslator.FromHtml("#3B5B8C");
-    public static readonly Color Teal = ColorTranslator.FromHtml("#0F766E");
-    public static readonly Color TealHover = ColorTranslator.FromHtml("#0B5F58");
-    public static readonly Color TealDisabled = ColorTranslator.FromHtml("#A7C7C3");
-    public static readonly Color Amber = ColorTranslator.FromHtml("#D97706");
+    public static readonly Color Accent = ColorTranslator.FromHtml("#0B6BD8");
+    public static readonly Color AccentHover = ColorTranslator.FromHtml("#0957B0");
+    public static readonly Color AccentDisabled = ColorTranslator.FromHtml("#A9C8EE");
+    public static readonly Color AccentLight = ColorTranslator.FromHtml("#DDEBFC");
+    public static readonly Color AccentSoft = ColorTranslator.FromHtml("#F1F7FE");
+    public static readonly Color Amber = ColorTranslator.FromHtml("#C2410C");
+    public static readonly Color AmberLight = ColorTranslator.FromHtml("#FDEEDC");
+    public static readonly Color Success = ColorTranslator.FromHtml("#16A34A");
+    public static readonly Color SuccessLight = ColorTranslator.FromHtml("#DCF5E4");
+    public static readonly Color SuccessText = ColorTranslator.FromHtml("#15803D");
+    public static readonly Color Folder = ColorTranslator.FromHtml("#F5C24C");
+    public static readonly Color ZipColor = ColorTranslator.FromHtml("#8B6FD6");
     public static readonly Color TextDark = ColorTranslator.FromHtml("#1F2937");
     public static readonly Color TextGray = ColorTranslator.FromHtml("#6B7280");
-    public static readonly Color Border = ColorTranslator.FromHtml("#D1D5DB");
-    public static readonly Color GridLine = ColorTranslator.FromHtml("#E5E7EB");
-    public static readonly Color Surface = ColorTranslator.FromHtml("#F3F4F6");
-    public static readonly Color RowAlt = ColorTranslator.FromHtml("#F9FAFB");
-    public static readonly Color HeaderSub = ColorTranslator.FromHtml("#DCE4F0");
-    public static readonly Color UpdateBack = ColorTranslator.FromHtml("#E6F2F1");
+    public static readonly Color Border = ColorTranslator.FromHtml("#CBD3DE");
+    public static readonly Color CheckBorder = ColorTranslator.FromHtml("#9AA6B6");
+    public static readonly Color CardBorder = ColorTranslator.FromHtml("#E1E6EE");
+    public static readonly Color GridLine = ColorTranslator.FromHtml("#E6E9EF");
+    public static readonly Color Surface = ColorTranslator.FromHtml("#EEF1F6");
+    public static readonly Color WindowBack = ColorTranslator.FromHtml("#EEF2F8");
+    public static readonly Color TableHead = ColorTranslator.FromHtml("#F1F4F8");
+    public static readonly Color RowAlt = ColorTranslator.FromHtml("#FAFBFD");
     public const string FontName = "Microsoft JhengHei UI";
 }
 
@@ -42,7 +51,9 @@ internal static class Ui
     /// <summary>自繪程式碼用：96 DPI 的像素數換算成目前 DPI。</summary>
     public static int Scaled(Control c, int px) => (int)Math.Round(px * c.DeviceDpi / 96.0);
 
-    public static Button MakeButton(string text, bool primary)
+    public static Button MakeButton(string text, bool primary) => MakeButton(text, primary ? ButtonKind.Primary : ButtonKind.Normal);
+
+    public static Button MakeButton(string text, ButtonKind kind)
     {
         var b = new Button
         {
@@ -56,48 +67,86 @@ internal static class Ui
             Cursor = Cursors.Hand,
             UseVisualStyleBackColor = false,
         };
-        if (primary)
+        switch (kind)
         {
-            b.BackColor = Theme.Teal;
-            b.ForeColor = Color.White;
-            b.Font = new Font(Theme.FontName, 10f, FontStyle.Bold);
-            b.FlatAppearance.BorderSize = 0;
-            b.FlatAppearance.MouseOverBackColor = Theme.TealHover;
-            b.FlatAppearance.MouseDownBackColor = Theme.TealHover;
-            b.EnabledChanged += (_, _) => b.BackColor = b.Enabled ? Theme.Teal : Theme.TealDisabled;
-        }
-        else
-        {
-            b.BackColor = Color.White;
-            b.ForeColor = Theme.TextDark;
-            b.FlatAppearance.BorderColor = Theme.Border;
-            b.FlatAppearance.BorderSize = 1;
-            b.FlatAppearance.MouseOverBackColor = Theme.Surface;
-            b.FlatAppearance.MouseDownBackColor = Theme.Border;
-            b.EnabledChanged += (_, _) =>
-            {
-                b.BackColor = b.Enabled ? Color.White : Theme.Surface;
-                b.FlatAppearance.BorderColor = b.Enabled ? Theme.Border : Theme.GridLine;
-            };
+            case ButtonKind.Primary:
+                b.BackColor = Theme.Accent;
+                b.ForeColor = Color.White;
+                b.Font = new Font(Theme.FontName, 10.5f, FontStyle.Bold);
+                b.FlatAppearance.BorderSize = 0;
+                b.FlatAppearance.MouseOverBackColor = Theme.AccentHover;
+                b.FlatAppearance.MouseDownBackColor = Theme.AccentHover;
+                b.EnabledChanged += (_, _) => b.BackColor = b.Enabled ? Theme.Accent : Theme.AccentDisabled;
+                break;
+            case ButtonKind.Outline:
+                b.BackColor = Color.White;
+                b.ForeColor = Theme.Accent;
+                b.Font = new Font(Theme.FontName, 10.5f, FontStyle.Bold);
+                b.FlatAppearance.BorderColor = Theme.Accent;
+                b.FlatAppearance.BorderSize = 1;
+                b.FlatAppearance.MouseOverBackColor = Theme.AccentSoft;
+                b.FlatAppearance.MouseDownBackColor = Theme.AccentLight;
+                b.EnabledChanged += (_, _) =>
+                {
+                    b.ForeColor = b.Enabled ? Theme.Accent : Theme.AccentDisabled;
+                    b.FlatAppearance.BorderColor = b.Enabled ? Theme.Accent : Theme.AccentDisabled;
+                };
+                break;
+            case ButtonKind.Link:
+                b.ForeColor = Theme.Accent;
+                b.Font = new Font(Theme.FontName, 10.5f, FontStyle.Underline);
+                b.FlatAppearance.BorderSize = 0;
+                b.FlatAppearance.MouseOverBackColor = Theme.AccentLight;
+                b.FlatAppearance.MouseDownBackColor = Theme.AccentLight;
+                b.EnabledChanged += (_, _) => b.ForeColor = b.Enabled ? Theme.Accent : Theme.AccentDisabled;
+                break;
+            default:
+                b.BackColor = Color.White;
+                b.ForeColor = Theme.TextDark;
+                b.FlatAppearance.BorderColor = Theme.Border;
+                b.FlatAppearance.BorderSize = 1;
+                b.FlatAppearance.MouseOverBackColor = Theme.AccentSoft;
+                b.FlatAppearance.MouseDownBackColor = Theme.AccentLight;
+                b.EnabledChanged += (_, _) =>
+                {
+                    b.BackColor = b.Enabled ? Color.White : Theme.Surface;
+                    b.FlatAppearance.BorderColor = b.Enabled ? Theme.Border : Theme.GridLine;
+                };
+                break;
         }
         return b;
     }
 }
 
-/// <summary>有邊框與標題的區塊，標題旁可放資訊圖示。</summary>
+internal enum ButtonKind
+{
+    Normal,
+    Primary,
+    Outline,
+    Link,
+}
+
+/// <summary>
+/// 白色圓角卡片，標題旁可放資訊圖示。主畫面用大標題（可加步驟編號、資料夾圖示、標題後的徽章），對話框用小標題。
+/// 卡片本身底色是白色（子控制項才會繼承白底），圓角外側用父容器的底色補上。
+/// </summary>
 internal sealed class SectionPanel : Panel
 {
     private readonly string title;
     private readonly InfoIcon? info;
-    private readonly Font titleFont = new(Theme.FontName, 10.5f, FontStyle.Bold);
+    private readonly Font titleFont;
+    private readonly bool large;
+    private string? badge;
 
-    public SectionPanel(string title, string? infoText, ToolTip tip)
+    public SectionPanel(string title, string? infoText, ToolTip tip, bool large = false)
     {
         this.title = title;
+        this.large = large;
+        titleFont = new Font(Theme.FontName, large ? 12.5f : 10.5f, FontStyle.Bold);
         DoubleBuffered = true;
         ResizeRedraw = true;
         BackColor = Color.White;
-        Padding = new Padding(14, 36, 14, 12);
+        Padding = large ? new Padding(18, 48, 18, 14) : new Padding(14, 36, 14, 12);
         Margin = new Padding(0, 0, 0, 12);
         if (infoText is not null)
         {
@@ -107,15 +156,36 @@ internal sealed class SectionPanel : Panel
         }
     }
 
+    /// <summary>標題前的步驟編號（主畫面的 1、2）。</summary>
+    public string? Step { get; set; }
+
+    /// <summary>標題前畫資料夾圖示。</summary>
+    public bool FolderGlyph { get; set; }
+
+    /// <summary>標題後的灰底小徽章，例如「2 個項目」。</summary>
+    public string? Badge
+    {
+        get => badge;
+        set
+        {
+            badge = value;
+            Invalidate();
+        }
+    }
+
+    private int TitleLeft => Padding.Left + (FolderGlyph ? Ui.Scaled(this, 32) : 0);
+
+    private string FullTitle => Step is null ? title : Step + "  " + title;
+
+    private int TitleBandHeight => Padding.Top - (large ? Ui.Scaled(this, 6) : 0);
+
     protected override void OnLayout(LayoutEventArgs levent)
     {
         base.OnLayout(levent);
         if (info is not null)
         {
-            var w = TextRenderer.MeasureText(title, titleFont).Width;
-            info.Location = new Point(
-                Padding.Left + w + Ui.Scaled(this, 2),
-                (Padding.Top - info.Height) / 2 + Ui.Scaled(this, 2));
+            var w = TextRenderer.MeasureText(FullTitle, titleFont).Width;
+            info.Location = new Point(TitleLeft + w + Ui.Scaled(this, 2), (TitleBandHeight - info.Height) / 2 + Ui.Scaled(this, 2));
         }
     }
 
@@ -123,16 +193,38 @@ internal sealed class SectionPanel : Panel
     {
         base.OnPaint(e);
         var g = e.Graphics;
+        g.Clear(Parent?.BackColor ?? Color.White);
         g.SmoothingMode = SmoothingMode.AntiAlias;
         var r = new Rectangle(0, 0, Width - 1, Height - 1);
-        using (var path = RoundedRect(r, Ui.Scaled(this, 8)))
-        using (var pen = new Pen(Theme.Border))
+        using (var path = RoundedRect(r, Ui.Scaled(this, large ? 10 : 8)))
         {
+            using var fill = new SolidBrush(Color.White);
+            g.FillPath(fill, path);
+            using var pen = new Pen(large ? Theme.CardBorder : Theme.Border);
             g.DrawPath(pen, path);
         }
-        var titleRect = new Rectangle(Padding.Left, Ui.Scaled(this, 2), Width - Padding.Horizontal, Padding.Top);
-        TextRenderer.DrawText(g, title, titleFont, titleRect, Theme.Primary,
+        var band = TitleBandHeight;
+        if (FolderGlyph)
+        {
+            var fh = Ui.Scaled(this, 18);
+            Glyphs.Folder(g, new Rectangle(Padding.Left, (band - fh) / 2 + Ui.Scaled(this, 2), Ui.Scaled(this, 22), fh), Theme.Accent, false);
+        }
+        var titleRect = new Rectangle(TitleLeft, Ui.Scaled(this, 2), Width - TitleLeft - Padding.Right, band);
+        TextRenderer.DrawText(g, FullTitle, titleFont, titleRect, large ? Theme.TextDark : Theme.Accent,
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        if (!string.IsNullOrEmpty(badge))
+        {
+            var tw = TextRenderer.MeasureText(FullTitle, titleFont).Width;
+            var x = TitleLeft + tw + Ui.Scaled(this, 10) + (info is null ? 0 : info.Width + Ui.Scaled(this, 4));
+            var size = TextRenderer.MeasureText(badge, Font);
+            var br = new Rectangle(x, Ui.Scaled(this, 2) + (band - size.Height - Ui.Scaled(this, 8)) / 2,
+                size.Width + Ui.Scaled(this, 16), size.Height + Ui.Scaled(this, 8));
+            using var bpath = RoundedRect(br, br.Height / 2);
+            using var b = new SolidBrush(Theme.Surface);
+            g.FillPath(b, bpath);
+            TextRenderer.DrawText(g, badge, Font, br, Theme.TextGray,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        }
     }
 
     protected override void Dispose(bool disposing)
@@ -222,8 +314,8 @@ internal sealed class ToggleSwitch : Control
 
     public string OffText { get; }
     public string OnText { get; }
-    public Color OffColor { get; set; } = Theme.Primary;
-    public Color OnColor { get; set; } = Theme.Teal;
+    public Color OffColor { get; set; } = Theme.TextGray;
+    public Color OnColor { get; set; } = Theme.Accent;
 
     public event EventHandler? CheckedChanged;
 

@@ -92,6 +92,27 @@ internal static class UiTestProgram
                     exitCode = 1;
                 }
                 form.SelectFilter(0);
+
+                // 搜尋：PXL 開頭的有 4 個（含重複的那個）
+                form.SetSearch("PXL");
+                await Settle();
+                var searchRows = form.VisibleRowCount;
+                form.SetSearch("");
+                await Settle();
+                // 勾選：新照片分頁取消第一列 → 複製按鈕變成 2 張，再勾回來
+                form.SelectFilter(1);
+                await Settle();
+                form.SetChecked(0, false);
+                await Settle();
+                Shot(form, Path.Combine(outDir, "3c_取消勾選.png"));
+                var uncheckedOk = form.CopyButtonText.Contains("2") && form.SelectionText.Contains("1 張未勾選");
+                log.Add($"搜尋 PXL 列數={searchRows}（應為 4） 取消勾選後按鈕={form.CopyButtonText} 說明={form.SelectionText}");
+                form.SetChecked(0, true);
+                form.SelectFilter(0);
+                if (searchRows != 4 || !uncheckedOk || !form.CopyButtonText.Contains("3"))
+                {
+                    exitCode = 1;
+                }
                 await form.CopyAsync(confirm: false);
                 await Settle();
                 Shot(form, Path.Combine(outDir, "4_複製完成.png"));
