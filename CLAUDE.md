@@ -26,7 +26,7 @@
 
 - `dotnet` 不在 PATH，用 `"C:\Program Files\dotnet\dotnet.exe"`（.NET 8 SDK，筆電 2026-11-07 用 winget 安裝，版本 8.0.427；桌機 8.0.425，2026-11-13 確認；`global.json` 要求 8.0.400 以上）。
 - 發佈：在 `Photo2Disk\` 執行 `dotnet publish -c Release -o ..\publish`，產出 `publish\照片備份過濾工具.exe`（自包含單一 exe，約 70 MB）。
-- 發佈新版給同學（自動更新）：改 `<Version>` → 專案根目錄執行 `python tools/make_release.py`，產出 `release\v<版本>\Photo2Disk.exe` 與 `.sha256` → GitHub 網頁建立 Release（Tag `v<版本>`，說明欄寫更新內容）上傳這兩個檔案。附件用英文檔名，因為 GitHub 會改寫非英文檔名；更新時沿用使用者電腦上原本的檔名。不要勾 pre-release（程式會略過），也不要漏掉 `.sha256`（沒有就不提示更新）。
+- 發佈新版給同學（自動更新）：改 `<Version>` → 專案根目錄執行 `python tools/make_release.py`，產出 `release\v<版本>\Photo2Disk.exe` 與 `.sha256` → 建立 Release（Tag `v<版本>`，說明欄寫更新內容）上傳這兩個檔案：桌機已裝 `gh` 並登入 Xnizst（2026-11-13），可用 `"C:\Program Files\GitHub CLI\gh.exe" release create v<版本> release/v<版本>/Photo2Disk.exe release/v<版本>/Photo2Disk.exe.sha256 --repo Xnizst/Photo2Disk --title v<版本> --notes "…"`；筆電沒有 `gh` 時用網頁建立。附件用英文檔名，因為 GitHub 會改寫非英文檔名；更新時沿用使用者電腦上原本的檔名。不要勾 pre-release（程式會略過），也不要漏掉 `.sha256`（沒有就不提示更新）。
 - 版本號只寫在 `Photo2Disk.csproj` 的 `<Version>`。
 - 程式圖示（YAN 2026-11-13 從三個候選選 A：藍綠底照片＋琥珀色匯入箭頭）：`python tools/make_icon.py A` 產生 `Photo2Disk/app.ico`（16～256 像素，32 像素以下用加粗版），csproj 的 `ApplicationIcon` 給 exe 用，同一檔案以 `EmbeddedResource`（`Photo2Disk.app.ico`）給視窗標題列用（`Ui.AppIcon`）。`--preview` 產生比較圖 `tools/icon_preview.png`。
 
@@ -68,4 +68,4 @@
   - Google 網頁版下載是否逐位元相同：查不到可靠來源。搜尋摘要提到 Google issue tracker 有使用者回報網頁版下載與上傳檔相同（需要登入，無法讀原文），另一篇 2024 年的部落格作者只寫「我相信原始畫質下載與上傳時相同」，沒有實測。也有使用者回報 Google 改寫了下載影片內的時間。仍需真實帳號實測（見下一點）。
 - 仍未驗證：Google 網頁版下載的照片與影片，內嵌的拍攝時間是否保留（網路上有影片時間被改寫的回報）。
 - 真實外接硬碟的掃描與比對耗時尚未實測：Benchmark 只量到系統快取已有目錄資訊時的掃描速度，外接傳統硬碟剛接上時會比較慢；讀取速度以傳統硬碟約 100～150 MB/s 估算。
-- 自動更新 2026-11-13 已對真正的 GitHub 驗證：v1.2.0 Release 發佈後，以 1.1.1 查詢得到新版、以 1.2.0 查詢不提示，下載替換後的檔案 SHA-256 與本機發佈檔相同。尚未實測：同學電腦上整段「提示列 → 更新 → 重新啟動」、未簽章 exe 是否被防毒軟體攔截。
+- 自動更新 2026-11-13 已對真正的 GitHub 驗證：v1.2.0 Release 發佈後，以 1.1.1 查詢得到新版、以 1.2.0 查詢不提示，下載替換後的檔案 SHA-256 與本機發佈檔相同。同日用 v1.2.1 Release 實測整段流程（桌機、設定導到暫存資料夾的 1.2.0 複本）：開啟後出現提示列、確認視窗顯示更新內容與 68.5 MB，按「是」後重新啟動成 1.2.1，exe 雜湊與 Release 相同、`.old` 已刪除、標題列有新圖示，Windows Defender 沒有攔截。尚未實測：同學的電腦。
