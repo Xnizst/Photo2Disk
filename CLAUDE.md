@@ -44,7 +44,7 @@
 - `Naming.cs`：`NamingOptions`（存在設定檔 `Naming`）、預設組合、`FileNamer.AssignNames`（流水號依其他文字分組各自編號、跳過已存在檔名；無流水號時撞名加 ` (2)`）。
 - `NamingDialog.cs`：檔名規則視窗，撥桿切換、勾選清單排序、細項只顯示用得到的欄位、即時預覽。`Ui.cs` 的 `ToggleSwitch` 是撥桿元件。
 - `ReorderCheckList.cs`：檔名組成清單（YAN 2026-11-13 要求支援滑鼠上下拖動）。自繪元件：點一下勾選、按住拖動排序（藍綠插入線）、Ctrl＋上下鍵移動。坑：內建 `CheckedListBox` 按下滑鼠時就改選取與勾選，和拖動衝突，所以不用它。
-- `Updater.cs`：自動更新（YAN 2026-11-13）。啟動時查 GitHub「最新 Release」API（10 秒逾時，失敗安靜略過），有新版且不是使用者略過的版本時，主畫面標題下方顯示藍綠提示列（立即更新／略過這一版／更新內容）。按更新才下載（同學確認後才執行），下載到 `<exe>.download` 並核對 SHA-256，執行中的 exe 改名成 `.old`（執行中不能覆寫但可以改名），新版放回原檔名後重新啟動；下次啟動在背景刪 `.old`。比對或複製進行中不能更新，下載中可按「取消」。設定 `CheckForUpdates`（預設 true，介面上沒有開關）、`SkippedVersion`。環境變數 `PHOTO2DISK_UPDATE_API` 可改 API 網址（測試用）。程式所在資料夾無法寫入時（例如放在 Program Files）會提示搬到自己的資料夾。
+- `Updater.cs`：自動更新（YAN 2026-11-13）。啟動時查 GitHub「最新 Release」API（10 秒逾時，失敗安靜略過），有新版且不是使用者略過的版本時，主畫面標題下方顯示藍綠提示列（立即更新／略過這一版／更新內容）。按「立即更新」後主畫面霧化（：截圖縮小再放大模糊、蓋一層淺色並擋住操作），另開更新視窗（，YAN 2026-11-13 要求）：確認階段顯示版本、大小、更新內容，按「開始更新」才下載（同學確認後才執行），下載階段顯示圓角進度條、已下載量與剩餘時間，失敗時錯誤訊息顯示在同一個視窗；下載到 `<exe>.download` 並核對 SHA-256，執行中的 exe 改名成 `.old`（執行中不能覆寫但可以改名），新版放回原檔名後重新啟動；下次啟動在背景刪 `.old`。比對或複製進行中不能更新，下載中可按「取消」。設定 `CheckForUpdates`（預設 true，介面上沒有開關）、`SkippedVersion`。環境變數 `PHOTO2DISK_UPDATE_API` 可改 API 網址（測試用）。程式所在資料夾無法寫入時（例如放在 Program Files）會提示搬到自己的資料夾。
 - `HashIndex.cs`：雜湊快取，存在備份資料夾根目錄的隱藏檔 `.photo2disk_index.tsv`（相對路徑、大小、修改時間、SHA-256）。大小或修改時間改變就重算；沒有變動時不重寫。
 - `MainForm.cs`：介面（WinForms，`AutoScaleMode.Dpi`，以 96 DPI 座標撰寫）。表格的勾選框與狀態標籤在 `CellPainting` 自己畫（不用 `DataGridViewCheckBoxColumn`，虛擬模式下要處理編輯提交，也畫不出設計稿的樣式）。
 - `Widgets.cs`：主畫面自繪元件：`PillLabel`、`SourceList`（來源清單，× 移除、滑鼠提示完整路徑、超過兩列捲動）、`StatTile`、`TabStrip`、`SearchBox`（也包住唯讀的備份路徑欄）、`StateLabel`、`Glyphs`（資料夾、zip、勾選框、完成圖示）。坑：視窗顯示前 `Control.Visible` 一律回傳 false，統計卡的顯示狀態要自己記錄。

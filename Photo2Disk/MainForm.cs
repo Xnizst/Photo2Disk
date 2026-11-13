@@ -1645,7 +1645,10 @@ public sealed class MainForm : Form
         return notes.Length > 1500 ? notes[..1500] + "…" : notes;
     }
 
-    /// <summary>下載新版、替換 exe、重新啟動。比對或複製進行中時不更新。</summary>
+    /// <summary>
+    /// 下載新版、替換 exe、重新啟動。比對或複製進行中時不更新。
+    /// 主畫面霧化，更新的確認、進度、結果都在獨立的更新視窗裡（YAN 2026-11-13）。
+    /// </summary>
     internal async Task UpdateNowAsync(bool confirm, string? targetExe = null, bool restart = true)
     {
         var info = pendingUpdate;
@@ -1658,24 +1661,21 @@ public sealed class MainForm : Form
         {
             return;
         }
-        if (confirm)
+
+        using var frost = new FrostLayer(this);
+        using var dlg = new UpdateDialog(info, VersionText);
+        dlg.ShowOver(this);
+        if (confirm && !await dlg.WaitForConfirmAsync())
         {
-            var text = $"要更新到 v{info.Version.ToString(3)} 嗎？" + Environment.NewLine
-                + $"會下載約 {DedupEngine.FormatSize(info.Size)}，完成後程式自動重新開啟。" + Environment.NewLine
-                + "設定（備份資料夾、檔名規則）會保留。";
-            if (info.Notes.Length > 0)
-            {
-                text += Environment.NewLine + Environment.NewLine + "更新內容：" + Environment.NewLine + NotesText(info);
-            }
-            if (MessageBox.Show(this, text, AppTitle, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
-            {
-                return;
-            }
+            dlg.CloseQuietly();
+            return;
         }
 
+        dlg.StartProgress();
         SetBusy(true);
         cts = new CancellationTokenSource();
-        progressBar.Value = 0;
+        var token = cts;
+        dlg.CancelRequested += (_, _) => token.Cancel();
         lblStatus.Text = "正在下載新版本…";
         var progress = new Progress<double>(f =>
         {
@@ -1683,17 +1683,29 @@ public sealed class MainForm : Form
             {
                 return; // 進度回報是非同步送達，最後一次可能晚於完成訊息，不能蓋掉它
             }
-            progressBar.Value = (int)Math.Clamp(f * progressBar.Maximum, 0, progressBar.Maximum);
+            dlg.SetProgress(f);
             lblStatus.Text = $"正在下載新版本：{f:P0}";
         });
+        if (OnUpdateDialogShown is not null)
+        {
+            await OnUpdateDialogShown(dlg);
+        }
+        string? error = null;
         try
         {
-            await Updater.DownloadAndReplaceAsync(info, exe, progress, cts.Token);
+            await Updater.DownloadAndReplaceAsync(info, exe, progress, token.Token);
             LastUpdateError = null;
+            SetBusy(false);
+            dlg.ShowDone();
             lblStatus.Text = $"已更新到 v{info.Version.ToString(3)}。";
             updateBar.Visible = false;
             pendingUpdate = null;
-            SetBusy(false);
+            if (OnUpdateDone is not null)
+            {
+                await OnUpdateDone(dlg);
+            }
+            await Task.Delay(restart ? 900 : 100);
+            dlg.CloseQuietly();
             if (restart)
             {
                 Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe)! });
@@ -1701,7 +1713,7 @@ public sealed class MainForm : Form
             }
             return;
         }
-        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
             lblStatus.Text = "已取消更新，目前版本不受影響。";
             LastUpdateError = "取消";
@@ -1710,23 +1722,36 @@ public sealed class MainForm : Form
         {
             LastUpdateError = "沒有寫入權限";
             lblStatus.Text = "更新失敗：程式所在的資料夾無法寫入。";
-            MessageBox.Show(this, "程式所在的資料夾無法寫入，無法更新。" + Environment.NewLine
-                + "請把程式放到桌面或「文件」等自己的資料夾後再更新。", AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            error = "程式所在的資料夾無法寫入，所以沒辦法更新。" + Environment.NewLine
+                + "請把程式放到桌面或「文件」等自己的資料夾後再更新。";
         }
         catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidDataException or TaskCanceledException)
         {
             LastUpdateError = ex.Message;
             lblStatus.Text = "更新失敗，目前版本不受影響。";
-            MessageBox.Show(this, "更新失敗，目前版本不受影響，可以稍後再試。" + Environment.NewLine + ex.Message,
-                AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            error = "下載或替換時發生錯誤：" + Environment.NewLine + ex.Message;
         }
-        progressBar.Value = 0;
         SetBusy(false);
+        if (error is null)
+        {
+            dlg.CloseQuietly();
+        }
+        else
+        {
+            dlg.ShowError(error);
+            await dlg.WhenClosed;
+        }
         if (closeAfterCancel)
         {
             BeginInvoke(Close);
         }
     }
+
+    /// <summary>介面測試：更新視窗進入下載階段後、開始下載前呼叫（用來截圖）。</summary>
+    internal Func<UpdateDialog, Task>? OnUpdateDialogShown { get; set; }
+
+    /// <summary>介面測試：下載完成、視窗關閉前呼叫。</summary>
+    internal Func<UpdateDialog, Task>? OnUpdateDone { get; set; }
 
     /// <summary>介面測試時不連網檢查更新。</summary>
     internal static bool AutoCheckUpdates { get; set; } = true;

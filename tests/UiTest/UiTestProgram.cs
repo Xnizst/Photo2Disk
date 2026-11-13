@@ -249,7 +249,31 @@ internal static class UiTestProgram
                     var fakeExe = Path.Combine(work, "app", "照片備份過濾工具.exe");
                     Directory.CreateDirectory(Path.GetDirectoryName(fakeExe)!);
                     File.WriteAllBytes(fakeExe, new byte[1000]);
+                    // 更新視窗的確認階段（霧化＋更新內容）
+                    using (new FrostLayer(form))
+                    using (var confirmDlg = new UpdateDialog(info!, MainForm.VersionText))
+                    {
+                        confirmDlg.ShowOver(form);
+                        await Settle();
+                        ShotScreenArea(form.Bounds, Path.Combine(outDir, "10b_更新確認.png"));
+                        confirmDlg.CloseQuietly();
+                    }
+                    // 更新視窗與霧化：下載前把進度設成 42% 截圖，完成時再截一張
+                    form.OnUpdateDialogShown = async d =>
+                    {
+                        d.SetProgress(0.42);
+                        await Settle();
+                        ShotScreenArea(form.Bounds, Path.Combine(outDir, "10c_更新進度.png"));
+                    };
+                    var doneText = "";
+                    form.OnUpdateDone = async d =>
+                    {
+                        await Settle();
+                        doneText = d.ProgressText;
+                        ShotScreenArea(form.Bounds, Path.Combine(outDir, "10d_更新完成.png"));
+                    };
                     await form.UpdateNowAsync(confirm: false, targetExe: fakeExe, restart: false);
+                    log.Add($"更新視窗完成文字={doneText}");
                     await Settle();
                     Shot(form, Path.Combine(outDir, "10b_更新完成.png"));
                     var replaced = File.ReadAllBytes(fakeExe).AsSpan().SequenceEqual(newExe) && File.Exists(fakeExe + ".old");
@@ -291,6 +315,16 @@ internal static class UiTestProgram
         Application.DoEvents();
         await Task.Delay(400);
         Application.DoEvents();
+    }
+
+    private static void ShotScreenArea(Rectangle b, string path)
+    {
+        using var bmp = new Bitmap(b.Width, b.Height);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.CopyFromScreen(b.Location, Point.Empty, b.Size);
+        }
+        bmp.Save(path, ImageFormat.Png);
     }
 
     private static void Shot(Form form, string path)
