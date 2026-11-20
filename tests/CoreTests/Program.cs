@@ -13,6 +13,9 @@ void Check(bool ok, string what)
     }
 }
 
+// 既有測試沿用「依複製日期」放資料夾（預設已改成依拍攝年份）
+NamingOptions ByCopyDate() => new() { Folders = FolderMode.CopyDate };
+
 var rng = new Random(20261107);
 byte[] Bytes(int size)
 {
@@ -102,7 +105,7 @@ try
     Check((File.GetAttributes(Path.Combine(backup, HashIndex.FileName)) & FileAttributes.Hidden) != 0, "快取檔為隱藏檔");
 
     // ---- 複製
-    var copy = DedupEngine.CopyNew(r1, null, CancellationToken.None);
+    var copy = DedupEngine.CopyNew(r1, null, CancellationToken.None, ByCopyDate());
     var outDir = copy.OutputFolder;
     Check(copy.Copied == 5, $"複製 5 張（實際 {copy.Copied}）");
     Check(File.Exists(Path.Combine(outDir, "IMG_0001.jpg")) && File.Exists(Path.Combine(outDir, "IMG_0001 (2).jpg")), "檔名衝突自動加 (2)");
@@ -133,7 +136,7 @@ try
     Check(lost.Status == ItemStatus.New && lost.IsMissingBefore, "刪除後再比對 → 新照片並標示曾遺失");
     Check(lost.PreviousImport?.RelativePath == Path.GetRelativePath(backup, Path.Combine(outDir, "散檔.jpg")), $"曾遺失註明當初匯入位置（{lost.PreviousImport?.RelativePath}）");
     Check(r6.Items.Count(i => i.IsMissingBefore) == 1, "只有被刪除的那張標示曾遺失");
-    var copy2 = DedupEngine.CopyNew(r6, null, CancellationToken.None);
+    var copy2 = DedupEngine.CopyNew(r6, null, CancellationToken.None, ByCopyDate());
     Check(copy2.Copied == 1, "曾遺失的照片可以補回");
     var r7 = DedupEngine.Analyze(backup, sources, null, CancellationToken.None);
     Check(r7.Count(ItemStatus.New) == 0 && r7.Items.All(i => !i.IsMissingBefore), "補回後再比對 → 全部硬碟已有");
@@ -179,7 +182,7 @@ try
         });
         try
         {
-            DedupEngine.CopyNew(r4, p, cts.Token);
+            DedupEngine.CopyNew(r4, p, cts.Token, ByCopyDate());
             Check(false, "應該被取消");
         }
         catch (OperationCanceledException)
@@ -189,7 +192,8 @@ try
         }
     }
 
-    Check(!Directory.EnumerateFiles(outDir, "*.p2d-partial").Any(), "取消後沒有殘留暫存檔");
+    Check(!Directory.EnumerateFiles(Path.Combine(backup, DedupEngine.StagingFolderName), "*.p2d-partial", SearchOption.AllDirectories).Any(),
+        "取消後沒有殘留暫存檔");
 
     // ---- 不同磁碟：zip 在 C、備份在 D，走平行計算路徑（zip 切段、兩邊同時讀）
     if (Directory.Exists(@"D:\") && !string.Equals(Path.GetPathRoot(work), @"D:\", StringComparison.OrdinalIgnoreCase))
@@ -372,6 +376,7 @@ try
     var rn = DedupEngine.Analyze(backup2, new[] { takeout }, null, CancellationToken.None);
     var naming = new NamingOptions();
     naming.Apply(NamingOptions.Presets.Single(x => x.Name == "拍攝年月-原檔名"));
+    naming.Folders = FolderMode.CopyDate;
     var cn = DedupEngine.CopyNew(rn, null, CancellationToken.None, naming);
     var copiedNames = Directory.EnumerateFiles(cn.OutputFolder).Select(Path.GetFileName).OrderBy(x => x).ToList();
     var expected = new[]
@@ -388,6 +393,73 @@ try
     Check(again.Count(ItemStatus.AlreadyBackedUp) == 5, "改名後再比對：全部硬碟已有");
     var hist = File.ReadAllLines(Path.Combine(backup2, ImportHistory.FileName)).Where(l => !l.StartsWith('#')).ToList();
     Check(hist.Count == 5 && hist.Any(l => l.EndsWith("2024-03-IMG_1234.jpg", StringComparison.Ordinal)), "匯入紀錄寫的是新檔名");
+
+    // ---- 依拍攝年份分資料夾
+    Check(new NamingOptions().Folders == FolderMode.Year, "預設依拍攝年份分資料夾");
+    var oldSettings = System.Text.Json.JsonSerializer.Deserialize<NamingOptions>("{\"Enabled\":true,\"DateFormat\":\"yyyy-MM\"}")!;
+    Check(oldSettings.Folders == FolderMode.Year, "舊版設定檔沒有資料夾設定 → 依拍攝年份");
+    var badSettings = System.Text.Json.JsonSerializer.Deserialize<NamingOptions>("{\"Folders\":9}")!;
+    badSettings.Normalize();
+    Check(badSettings.Folders == FolderMode.Year, "資料夾設定值不合法 → 依拍攝年份");
+
+    string Staging(string root) => Path.Combine(root, DedupEngine.StagingFolderName);
+    List<string> RelFiles(string root) => Directory.EnumerateFiles(Staging(root), "*", SearchOption.AllDirectories)
+        .Select(f => Path.GetRelativePath(Staging(root), f)).OrderBy(x => x, StringComparer.Ordinal).ToList();
+
+    var backupY = Path.Combine(work2, "硬碟Y", "照片");
+    Directory.CreateDirectory(backupY);
+    var ry = DedupEngine.Analyze(backupY, new[] { takeout }, null, CancellationToken.None);
+    var cy = DedupEngine.CopyNew(ry, null, CancellationToken.None, new NamingOptions { Folders = FolderMode.Year });
+    var vy = videoLocal.ToString("yyyy");
+    var expectedY = new[]
+    {
+        @"2024\IMG_1234.jpg", @"2024\IMG_1240.HEIC", vy + @"\VID_0007.mp4", @"2023\PXL_20231105_190233001.jpg",
+        NamingOptions.UnknownDateFolder + @"\random.png",
+    }.OrderBy(x => x, StringComparer.Ordinal).ToList();
+    var gotY = RelFiles(backupY);
+    Check(gotY.SequenceEqual(expectedY), "依拍攝年份：" + string.Join("、", gotY));
+    Check(cy.OutputFolder == Staging(backupY), "依拍攝年份時輸出資料夾是「_待整理」本身");
+    Check(cy.FolderCounts.GetValueOrDefault("2024") == 2 && cy.FolderCounts.GetValueOrDefault(NamingOptions.UnknownDateFolder) == 1
+          && cy.FolderCounts.Values.Sum() == 5, "各資料夾張數：" + string.Join("、", cy.FolderCounts.Select(kv => $"{kv.Key}={kv.Value}")));
+    var pngY = ry.Items.Single(i => i.FileName == "random.png");
+    Check(pngY.NameNote == "找不到拍攝時間，放在「日期不明」資料夾", "只有檔案修改時間 → 日期不明並註明：" + pngY.NameNote);
+    Check(ry.Items.Single(i => i.FileName == "PXL_20231105_190233001.jpg").NameNote is null, "原檔名日期可信，分進年份、不加註明");
+    Check(!Directory.EnumerateFiles(Staging(backupY), "*.p2d-partial", SearchOption.AllDirectories).Any(), "依拍攝年份：沒有殘留暫存檔");
+    var againY = DedupEngine.Analyze(backupY, new[] { takeout }, null, CancellationToken.None);
+    Check(againY.Count(ItemStatus.AlreadyBackedUp) == 5, "分年份後再比對：全部硬碟已有");
+    var histY = File.ReadAllLines(Path.Combine(backupY, ImportHistory.FileName)).Where(l => !l.StartsWith('#')).ToList();
+    Check(histY.Any(l => l.EndsWith(DedupEngine.StagingFolderName + @"\2024\IMG_1234.jpg", StringComparison.Ordinal)), "匯入紀錄寫的是年份資料夾裡的位置");
+
+    // ---- 年份＋月份，搭配流水號（流水號在每個資料夾內各自編）
+    var backupM = Path.Combine(work2, "硬碟M", "照片");
+    Directory.CreateDirectory(backupM);
+    var rm = DedupEngine.Analyze(backupM, new[] { takeout }, null, CancellationToken.None);
+    var namingM = new NamingOptions();
+    namingM.Apply(NamingOptions.Presets.Single(x => x.Name == "拍攝日期-流水號"));
+    namingM.Folders = FolderMode.YearMonth;
+    DedupEngine.CopyNew(rm, null, CancellationToken.None, namingM);
+    var gotM = RelFiles(backupM);
+    var vm = videoLocal.ToString("yyyy") + @"\" + videoLocal.ToString("yyyy-MM") + @"\" + videoLocal.ToString("yyyy-MM-dd") + "-001.mp4";
+    var expectedM = new[]
+    {
+        @"2024\2024-03\2024-03-15-001.jpg", @"2024\2024-03\2024-03-15-002.HEIC", vm,
+        @"2023\2023-11\2023-11-05-001.jpg", NamingOptions.UnknownDateFolder + @"\2022-01-02-001.png",
+    }.OrderBy(x => x, StringComparer.Ordinal).ToList();
+    Check(gotM.SequenceEqual(expectedM), "年份＋月份＋流水號：" + string.Join("、", gotM));
+    var pngM = rm.Items.Single(i => i.FileName == "random.png");
+    Check(pngM.NameNote == "找不到拍攝時間，檔名日期取自檔案修改時間，放在「日期不明」資料夾", "檔名與資料夾的註明合併：" + pngM.NameNote);
+
+    // ---- 同一個年份資料夾已有同名檔案 → 加 (2)，不覆蓋
+    var rm2Backup = Path.Combine(work2, "硬碟Y2", "照片");
+    Directory.CreateDirectory(Path.Combine(rm2Backup, DedupEngine.StagingFolderName, "2024"));
+    var squatter = Bytes(1234);
+    File.WriteAllBytes(Path.Combine(rm2Backup, DedupEngine.StagingFolderName, "2024", "IMG_1234.jpg"), squatter);
+    var ry2 = DedupEngine.Analyze(rm2Backup, new[] { takeout }, null, CancellationToken.None);
+    DedupEngine.CopyNew(ry2, null, CancellationToken.None, new NamingOptions { Folders = FolderMode.Year });
+    var y2 = Path.Combine(rm2Backup, DedupEngine.StagingFolderName, "2024");
+    Check(File.ReadAllBytes(Path.Combine(y2, "IMG_1234.jpg")).AsSpan().SequenceEqual(squatter)
+          && File.ReadAllBytes(Path.Combine(y2, "IMG_1234 (2).jpg")).AsSpan().SequenceEqual(jpgLe),
+        "年份資料夾已有同名檔案：新照片加 (2)，原檔不變");
 }
 finally
 {

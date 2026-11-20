@@ -71,7 +71,12 @@ public sealed class CopySummary
 {
     public int Copied { get; set; }
     public long Bytes { get; set; }
+
+    /// <summary>依複製日期時是當天的資料夾；依拍攝日期時是「_待整理」本身。</summary>
     public string OutputFolder { get; set; } = "";
+
+    /// <summary>每個子資料夾（相對於「_待整理」）複製了幾張。</summary>
+    public SortedDictionary<string, int> FolderCounts { get; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 /// <summary>要直接顯示給使用者看的錯誤。</summary>
@@ -254,22 +259,28 @@ public static class DedupEngine
 
     // ---------------------------------------------------------------- 複製
 
-    public static string GetStagingFolder(string backupRoot, DateTime now)
+    public static string GetStagingRoot(string backupRoot) => Path.Combine(backupRoot, StagingFolderName);
+
+    /// <summary>新照片要放的資料夾：依複製日期時是當天的資料夾，依拍攝日期時是「_待整理」（底下再分年份）。</summary>
+    public static string GetOutputFolder(string backupRoot, DateTime now, NamingOptions naming)
     {
-        return Path.Combine(backupRoot, StagingFolderName, now.ToString("yyyy-MM-dd"));
+        return naming.ByShotDate
+            ? GetStagingRoot(backupRoot)
+            : Path.Combine(GetStagingRoot(backupRoot), naming.SubFolderFor(default, now));
     }
 
     /// <summary>
-    /// 複製新照片。每張先寫成暫存檔（邊寫邊核對雜湊），全部完成、取消或出錯時，
-    /// 已完成的暫存檔依檔名規則（依拍攝時間排序，流水號才會照時間編）改成正式檔名。
+    /// 複製新照片。每張先寫成「_待整理」裡的暫存檔（邊寫邊核對雜湊），全部完成、取消或出錯時，
+    /// 已完成的暫存檔依規則決定子資料夾與檔名（依拍攝時間排序，流水號才會照時間編）再搬過去。
     /// </summary>
     public static CopySummary CopyNew(AnalysisResult analysis, IProgress<ProgressInfo>? progress, CancellationToken ct,
         NamingOptions? naming = null)
     {
         naming ??= new NamingOptions();
         var toCopy = analysis.Items.Where(i => i.Status == ItemStatus.New && i.CopiedTo is null && !i.Excluded).ToList();
-        var outDir = GetStagingFolder(analysis.BackupRoot, DateTime.Now);
-        var summary = new CopySummary { OutputFolder = outDir };
+        var importTime = DateTime.Now;
+        var stagingRoot = GetStagingRoot(analysis.BackupRoot);
+        var summary = new CopySummary { OutputFolder = GetOutputFolder(analysis.BackupRoot, importTime, naming) };
         if (toCopy.Count == 0)
         {
             return summary;
@@ -287,14 +298,13 @@ public static class DedupEngine
                 $"外接硬碟空間不足：需要 {FormatSize(need)}，目前只剩 {FormatSize(free)}。");
         }
 
-        Directory.CreateDirectory(outDir);
-        DeleteStalePartials(outDir);
+        Directory.CreateDirectory(stagingRoot);
+        DeleteStalePartials(stagingRoot);
         var index = HashIndex.Load(analysis.BackupRoot);
         var meter = new ByteMeter("複製新照片", need, progress);
         var history = ImportHistory.Load(analysis.BackupRoot);
         var imported = new List<ImportRecord>();
-        var importTime = DateTime.Now;
-        var needMedia = naming.Uses(NamePartKind.Date) || naming.Uses(NamePartKind.CameraModel)
+        var needMedia = naming.ByShotDate || naming.Uses(NamePartKind.Date) || naming.Uses(NamePartKind.CameraModel)
                         || naming.Uses(NamePartKind.Sequence);
         var completed = new List<CopiedFile>();
         var copyFailed = false;
@@ -307,7 +317,7 @@ public static class DedupEngine
                 foreach (var it in group)
                 {
                     ct.ThrowIfCancellationRequested();
-                    var partial = Path.Combine(outDir, Guid.NewGuid().ToString("N") + PartialSuffix);
+                    var partial = Path.Combine(stagingRoot, Guid.NewGuid().ToString("N") + PartialSuffix);
                     meter.Detail = it.FileName;
                     try
                     {
@@ -350,7 +360,7 @@ public static class DedupEngine
         {
             try
             {
-                var moveError = FinishCopies(analysis.BackupRoot, outDir, naming, needMedia, completed, index,
+                var moveError = FinishCopies(analysis.BackupRoot, stagingRoot, naming, needMedia, completed, index,
                     imported, importTime, summary);
                 if (moveError is not null && !copyFailed)
                 {
@@ -369,8 +379,11 @@ public static class DedupEngine
 
     private sealed record CopiedFile(SourceItem Item, string Partial, string Hash, int Order);
 
-    /// <summary>把完成的暫存檔改成正式檔名；改名失敗的刪除暫存檔（下次比對仍是新照片），回傳第一個錯誤。</summary>
-    private static Exception? FinishCopies(string backupRoot, string outDir, NamingOptions naming, bool sortByDate,
+    /// <summary>
+    /// 把完成的暫存檔搬到規則決定的子資料夾並改成正式檔名；搬移失敗的刪除暫存檔（下次比對仍是新照片），
+    /// 回傳第一個錯誤。檔名（含流水號）在每個子資料夾內各自決定。
+    /// </summary>
+    private static Exception? FinishCopies(string backupRoot, string stagingRoot, NamingOptions naming, bool sortByDate,
         List<CopiedFile> completed, HashIndex index, List<ImportRecord> imported, DateTime importTime, CopySummary summary)
     {
         if (completed.Count == 0)
@@ -380,47 +393,70 @@ public static class DedupEngine
         var ordered = sortByDate
             ? completed.OrderBy(c => c.Item.Media?.Taken ?? DateTime.MaxValue).ThenBy(c => c.Order).ToList()
             : completed;
-        var inputs = ordered
-            .Select(c => new NameInput(c.Item.FileName, c.Item.Media ?? default, FileNamer.FolderNameOf(c.Item)))
-            .ToList();
-        var names = FileNamer.AssignNames(naming, inputs, name =>
-        {
-            var full = Path.Combine(outDir, name);
-            return File.Exists(full) || Directory.Exists(full) || File.Exists(full + PartialSuffix);
-        });
 
         Exception? firstError = null;
-        for (var i = 0; i < ordered.Count; i++)
+        foreach (var group in ordered.GroupBy(c => naming.SubFolderFor(c.Item.Media ?? default, importTime),
+                     StringComparer.OrdinalIgnoreCase))
         {
-            var (it, partial, hash, _) = ordered[i];
-            var target = Path.Combine(outDir, names[i]);
-            try
+            var subFolder = group.Key;
+            var dir = Path.Combine(stagingRoot, subFolder);
+            var files = group.ToList();
+            var inputs = files
+                .Select(c => new NameInput(c.Item.FileName, c.Item.Media ?? default, FileNamer.FolderNameOf(c.Item)))
+                .ToList();
+            var names = FileNamer.AssignNames(naming, inputs, name =>
             {
-                File.Move(partial, target);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                var full = Path.Combine(dir, name);
+                return File.Exists(full) || Directory.Exists(full) || File.Exists(full + PartialSuffix);
+            });
+            var unknownFolder = naming.ByShotDate && subFolder == NamingOptions.UnknownDateFolder;
+
+            for (var i = 0; i < files.Count; i++)
             {
-                TryDeletePartial(partial);
-                firstError ??= ex;
-                continue;
+                var (it, partial, hash, _) = files[i];
+                var target = Path.Combine(dir, names[i]);
+                try
+                {
+                    Directory.CreateDirectory(dir);
+                    File.Move(partial, target);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    TryDeletePartial(partial);
+                    firstError ??= ex;
+                    continue;
+                }
+                var fi = new FileInfo(target);
+                var rel = Path.GetRelativePath(backupRoot, target);
+                index.Set(rel, fi.Length, fi.LastWriteTimeUtc.Ticks, hash);
+                imported.Add(new ImportRecord(hash, fi.Length, importTime, rel));
+                it.Hash = hash;
+                it.CopiedTo = target;
+                it.NameNote = CopyNote(naming, it.Media?.Source ?? DateSource.None, unknownFolder);
+                summary.Copied++;
+                summary.Bytes += it.Size;
+                summary.FolderCounts[subFolder] = summary.FolderCounts.GetValueOrDefault(subFolder) + 1;
             }
-            var fi = new FileInfo(target);
-            var rel = Path.GetRelativePath(backupRoot, target);
-            index.Set(rel, fi.Length, fi.LastWriteTimeUtc.Ticks, hash);
-            imported.Add(new ImportRecord(hash, fi.Length, importTime, rel));
-            it.Hash = hash;
-            it.CopiedTo = target;
-            it.NameNote = naming.Uses(NamePartKind.Date) ? DateNote(it.Media?.Source ?? DateSource.None) : null;
-            summary.Copied++;
-            summary.Bytes += it.Size;
         }
         return firstError;
+    }
+
+    /// <summary>結果清單的補充說明：檔名日期的來源、為什麼放在「日期不明」。</summary>
+    private static string? CopyNote(NamingOptions naming, DateSource source, bool unknownFolder)
+    {
+        var dateNote = naming.Uses(NamePartKind.Date) ? DateNote(source) : null;
+        if (!unknownFolder)
+        {
+            return dateNote;
+        }
+        const string folderNote = "放在「" + NamingOptions.UnknownDateFolder + "」資料夾";
+        return dateNote is null ? "找不到拍攝時間，" + folderNote : dateNote + "，" + folderNote;
     }
 
     private static string? DateNote(DateSource source) => source switch
     {
         DateSource.FileName => "日期取自原檔名",
-        DateSource.FileTime => "找不到拍攝時間，日期取自檔案修改時間",
+        DateSource.FileTime => "找不到拍攝時間，檔名日期取自檔案修改時間",
         DateSource.None => "找不到拍攝時間，檔名沒有加日期",
         _ => null,
     };

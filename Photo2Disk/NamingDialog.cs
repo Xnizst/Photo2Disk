@@ -1,6 +1,6 @@
 namespace Photo2Disk;
 
-/// <summary>設定複製新照片時的檔名規則。</summary>
+/// <summary>設定複製新照片時的資料夾與檔名規則。</summary>
 internal sealed class NamingDialog : Form
 {
     private const string CustomPresetText = "（自訂）";
@@ -8,6 +8,9 @@ internal sealed class NamingDialog : Form
     private readonly NamingOptions options;
     private readonly ToolTip tip = new() { AutoPopDelay = 30000, InitialDelay = 200, ReshowDelay = 100 };
 
+    private readonly ToggleSwitch folderToggle = new("依複製日期", "依拍攝年份");
+    private readonly ComboBox cboFolder = new();
+    private readonly TableLayoutPanel folderDetail = new();
     private readonly ToggleSwitch toggle = new("保留原檔名", "依規則改名");
     private readonly ComboBox cboPreset = new();
     private readonly ReorderCheckList lstParts = new();
@@ -38,7 +41,7 @@ internal sealed class NamingDialog : Form
         Font = new Font(Theme.FontName, 10f);
         ForeColor = Theme.TextDark;
         BackColor = Color.White;
-        Text = "檔名規則";
+        Text = "檔名與資料夾";
         Icon = Ui.AppIcon ?? Icon;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
@@ -57,7 +60,7 @@ internal sealed class NamingDialog : Form
             Margin = new Padding(0),
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 720));
-        root.Controls.Add(BuildModeSection());
+        root.Controls.Add(BuildTopRow());
         root.Controls.Add(BuildPartsRow());
         root.Controls.Add(BuildPreviewSection());
         root.Controls.Add(BuildButtons());
@@ -79,6 +82,81 @@ internal sealed class NamingDialog : Form
 
     // ================================================================ 版面
 
+    /// <summary>「資料夾」與「改名方式」左右並排。</summary>
+    private Control BuildTopRow()
+    {
+        var row = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = new Padding(0),
+        };
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        row.Controls.Add(BuildFolderSection(), 0, 0);
+        row.Controls.Add(BuildModeSection(), 1, 0);
+        return row;
+    }
+
+    private Control BuildFolderSection()
+    {
+        var root = DedupEngine.StagingFolderName;
+        var section = new SectionPanel("資料夾",
+            $"依複製日期：每次複製放進「{root}\\今天日期」，例如 {root}\\{DateTime.Now:yyyy-MM-dd}。" + Environment.NewLine
+            + $"依拍攝年份：依每張照片的拍攝日期放進「{root}\\2024」；選「年份＋月份」時放進「{root}\\2024\\2024-03」。" + Environment.NewLine
+            + "拍攝日期取自照片記錄的拍攝時間、影片記錄的建立時間或原檔名裡的日期；" + Environment.NewLine
+            + $"都找不到的照片放進「{root}\\{NamingOptions.UnknownDateFolder}」，不用檔案修改時間（可能是下載當天）分類。" + Environment.NewLine
+            + "資料夾都在備份資料夾裡，之後可以隨意搬移，不影響下次比對。",
+            tip)
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = new Padding(0, 0, 6, 12),
+        };
+        folderToggle.Margin = new Padding(0, 0, 0, 2);
+        folderToggle.CheckedChanged += (_, _) => OnControlsChanged();
+
+        folderDetail.ColumnCount = 2;
+        folderDetail.AutoSize = true;
+        folderDetail.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+        folderDetail.Margin = new Padding(0, 8, 0, 0);
+        folderDetail.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        folderDetail.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        folderDetail.Controls.Add(new Label
+        {
+            Text = "分層",
+            AutoSize = true,
+            Anchor = AnchorStyles.Left,
+            Margin = new Padding(0, 0, 8, 0),
+        }, 0, 0);
+        cboFolder.DropDownStyle = ComboBoxStyle.DropDownList;
+        cboFolder.Dock = DockStyle.Fill;
+        cboFolder.Margin = new Padding(0);
+        cboFolder.Items.AddRange(new object[] { "年份（2024）", "年份＋月份（2024\\2024-03）" });
+        cboFolder.SelectedIndexChanged += (_, _) => OnControlsChanged();
+        tip.SetToolTip(cboFolder, "只分年份，或年份底下再依月份分資料夾");
+        folderDetail.Controls.Add(cboFolder, 1, 0);
+
+        var layout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            ColumnCount = 1,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = new Padding(0),
+        };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.Controls.Add(folderToggle, 0, 0);
+        folderDetail.Dock = DockStyle.Fill;
+        layout.Controls.Add(folderDetail, 0, 1);
+        section.Controls.Add(layout);
+        return section;
+    }
+
     private Control BuildModeSection()
     {
         var section = new SectionPanel("改名方式",
@@ -91,6 +169,7 @@ internal sealed class NamingDialog : Form
             Dock = DockStyle.Fill,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = new Padding(6, 0, 0, 12),
         };
         toggle.Margin = new Padding(0, 0, 0, 2);
         toggle.Dock = DockStyle.Top;
@@ -276,7 +355,8 @@ internal sealed class NamingDialog : Form
     {
         var section = new SectionPanel("預覽",
             "範例：2024-03-15 用 iPhone 15 Pro 拍的兩張照片，以及隔天的一段影片，" + Environment.NewLine
-            + "放在來源資料的「2024 日本旅遊」資料夾。實際檔名依每張照片記錄的拍攝時間而定。",
+            + "放在來源資料的「2024 日本旅遊」資料夾。實際資料夾與檔名依每張照片記錄的拍攝時間而定。" + Environment.NewLine
+            + "右側顯示的是「_待整理」底下的位置。",
             tip)
         {
             Dock = DockStyle.Fill,
@@ -374,6 +454,8 @@ internal sealed class NamingDialog : Form
         loading = true;
         try
         {
+            folderToggle.Checked = options.ByShotDate;
+            cboFolder.SelectedIndex = options.Folders == FolderMode.YearMonth ? 1 : 0;
             toggle.Checked = options.Enabled;
             lstParts.SetItems(options.Parts.Select(p => new ReorderCheckList.Item
             {
@@ -399,6 +481,9 @@ internal sealed class NamingDialog : Form
         {
             return;
         }
+        options.Folders = !folderToggle.Checked
+            ? FolderMode.CopyDate
+            : cboFolder.SelectedIndex == 1 ? FolderMode.YearMonth : FolderMode.Year;
         options.Enabled = toggle.Checked;
         options.Parts = lstParts.Items
             .Select(p => new NamePart { Kind = (NamePartKind)p.Tag, Enabled = p.Checked })
@@ -422,6 +507,7 @@ internal sealed class NamingDialog : Form
     private void RefreshView()
     {
         SuspendLayout();
+        folderDetail.Visible = options.ByShotDate;
         partsRow.Visible = options.Enabled;
         lblDate.Visible = cboDate.Visible = options.Uses(NamePartKind.Date);
         lblCustom.Visible = txtCustom.Visible = options.Uses(NamePartKind.CustomText);
@@ -435,9 +521,10 @@ internal sealed class NamingDialog : Form
         loading = false;
 
         var names = FileNamer.AssignNames(options, FileNamer.Samples, _ => false);
+        var now = DateTime.Now;
         for (var i = 0; i < names.Count; i++)
         {
-            previewNew[i].Text = names[i];
+            previewNew[i].Text = options.SubFolderFor(FileNamer.Samples[i].Info, now) + "\\" + names[i];
         }
         UpdateMoveButtons();
         ResumeLayout(true);

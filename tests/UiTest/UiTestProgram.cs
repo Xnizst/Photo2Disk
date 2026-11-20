@@ -176,15 +176,17 @@ internal static class UiTestProgram
                     exitCode = 1;
                 }
 
-                // 檔名規則視窗：保留原檔名、拍攝年月-原檔名、自訂文字-拍攝日期-流水號
-                var cases = new List<(string Label, NamingOptions Options)> { ("8a_檔名規則_保留原檔名", new NamingOptions()) };
-                var byMonth = new NamingOptions();
+                // 檔名與資料夾視窗：預設（依拍攝年份、保留原檔名）、年份＋月份＋拍攝年月-原檔名、
+                // 自訂文字-拍攝日期-流水號、依複製日期
+                var cases = new List<(string Label, NamingOptions Options)> { ("8a_檔名規則_預設_依年份_保留原檔名", new NamingOptions()) };
+                var byMonth = new NamingOptions { Folders = FolderMode.YearMonth };
                 byMonth.Apply(NamingOptions.Presets[0]);
-                cases.Add(("8b_檔名規則_拍攝年月-原檔名", byMonth));
+                cases.Add(("8b_檔名規則_年份月份_拍攝年月-原檔名", byMonth));
                 var custom = new NamingOptions();
                 custom.Apply(NamingOptions.Presets.Single(p => p.Name == "自訂文字-拍攝日期-流水號"));
                 custom.CustomText = "日本旅遊";
                 cases.Add(("8c_檔名規則_自訂文字-日期-流水號", custom));
+                cases.Add(("8d_檔名規則_依複製日期", new NamingOptions { Folders = FolderMode.CopyDate }));
                 foreach (var (label, opts) in cases)
                 {
                     using var dlg = new NamingDialog(opts)
@@ -197,7 +199,7 @@ internal static class UiTestProgram
                     await Settle();
                     await Task.Delay(300); // 等撥桿動畫結束
                     Shot(dlg, Path.Combine(outDir, label + ".png"));
-                    log.Add($"{label} size={dlg.Size} 確認視窗說明：{MainForm.NamingLine(opts)}");
+                    log.Add($"{label} size={dlg.Size} 確認視窗說明：{MainForm.FolderLine(opts)} {MainForm.NamingLine(opts)}");
                     dlg.Close();
                 }
 

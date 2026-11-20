@@ -21,9 +21,29 @@ public sealed class NamePart
     public bool Enabled { get; set; }
 }
 
-/// <summary>複製新照片時的檔名規則，存在使用者設定裡。</summary>
+/// <summary>新照片放在「_待整理」底下的哪一種子資料夾。</summary>
+public enum FolderMode
+{
+    /// <summary>複製當天的日期（_待整理\2026-11-20）。</summary>
+    CopyDate,
+
+    /// <summary>拍攝年份（_待整理\2024）。</summary>
+    Year,
+
+    /// <summary>拍攝年份＋月份（_待整理\2024\2024-03）。</summary>
+    YearMonth,
+}
+
+/// <summary>複製新照片時的檔名與資料夾規則，存在使用者設定裡。</summary>
 public sealed class NamingOptions
 {
+    public const string UnknownDateFolder = "日期不明";
+
+    /// <summary>預設依拍攝年份分資料夾（YAN 2026-11-20 決定預設開啟）。</summary>
+    public FolderMode Folders { get; set; } = FolderMode.Year;
+
+    public bool ByShotDate => Folders != FolderMode.CopyDate;
+
     public bool Enabled { get; set; }
     public List<NamePart> Parts { get; set; } = DefaultParts();
     public string DateFormat { get; set; } = "yyyy-MM";
@@ -82,6 +102,7 @@ public sealed class NamingOptions
 
     public NamingOptions Clone() => new()
     {
+        Folders = Folders,
         Enabled = Enabled,
         Parts = Parts.Select(p => new NamePart { Kind = p.Kind, Enabled = p.Enabled }).ToList(),
         DateFormat = DateFormat,
@@ -114,8 +135,45 @@ public sealed class NamingOptions
         {
             SequenceDigits = 3;
         }
+        if (!Enum.IsDefined(Folders))
+        {
+            Folders = FolderMode.Year;
+        }
         CustomText ??= "";
     }
+
+    // ------------------------------------------------------------ 資料夾
+
+    /// <summary>
+    /// 新照片在「_待整理」底下的子資料夾（相對路徑）。依拍攝日期分時，只採用照片記錄的拍攝時間、
+    /// 影片時間與原檔名日期；只剩檔案修改時間（可能是下載當天）的放「日期不明」，避免分到錯誤年份。
+    /// </summary>
+    public string SubFolderFor(MediaInfo info, DateTime copyTime)
+    {
+        if (Folders == FolderMode.CopyDate)
+        {
+            return copyTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        }
+        if (info.Taken is not { } t || !IsReliableDate(info.Source))
+        {
+            return UnknownDateFolder;
+        }
+        var year = t.ToString("yyyy", CultureInfo.InvariantCulture);
+        return Folders == FolderMode.Year
+            ? year
+            : Path.Combine(year, t.ToString("yyyy-MM", CultureInfo.InvariantCulture));
+    }
+
+    public static bool IsReliableDate(DateSource source) =>
+        source is DateSource.Exif or DateSource.Video or DateSource.FileName;
+
+    /// <summary>給介面顯示的資料夾說明，例如「依拍攝年份（_待整理\2024）」。</summary>
+    public string DescribeFolders() => Folders switch
+    {
+        FolderMode.Year => $"依拍攝年份（{DedupEngine.StagingFolderName}\\2024）",
+        FolderMode.YearMonth => $"依拍攝年份與月份（{DedupEngine.StagingFolderName}\\2024\\2024-03）",
+        _ => $"依複製日期（{DedupEngine.StagingFolderName}\\{DateTime.Now:yyyy-MM-dd}）",
+    };
 
     /// <summary>給介面顯示的簡短說明，例如「拍攝日期-原檔名」。</summary>
     public string Describe()

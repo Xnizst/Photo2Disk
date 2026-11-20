@@ -19,7 +19,7 @@ public sealed class MainForm : Form
 
     private readonly Button btnAnalyze = Ui.MakeButton("▶  開始比對", ButtonKind.Primary);
     private readonly Button btnCopy = Ui.MakeButton("複製新照片", ButtonKind.Outline);
-    private readonly Button btnNaming = Ui.MakeButton("檔名規則…", ButtonKind.Link);
+    private readonly Button btnNaming = Ui.MakeButton("檔名與資料夾…", ButtonKind.Link);
     private readonly Button btnCancel = Ui.MakeButton("取消", false);
     private readonly ProgressBar progressBar = new();
     private readonly TableLayoutPanel progressArea = new();
@@ -226,7 +226,8 @@ public sealed class MainForm : Form
     {
         var section = new SectionPanel("備份位置",
             "外接硬碟上放照片的資料夾，裡面的子資料夾也會一起比對。" + Environment.NewLine
-            + "新照片會複製到這個資料夾裡的「_待整理\\日期」資料夾，整理時可以隨意搬移、改名，不影響下次比對。",
+            + "新照片會複製到這個資料夾裡的「_待整理」資料夾（預設依拍攝年份再分資料夾，可按「檔名與資料夾…」更改），" + Environment.NewLine
+            + "整理時可以隨意搬移、改名，不影響下次比對。",
             tip, large: true)
         {
             Step = "1",
@@ -356,7 +357,7 @@ public sealed class MainForm : Form
         tip.SetToolTip(btnAnalyze, "找出來源資料中，哪些已經在硬碟裡（只讀取，不會改動任何檔案）");
         tip.SetToolTip(btnCopy, "把勾選的新照片複製到「_待整理」資料夾");
         btnNaming.AutoSize = false;
-        btnNaming.Size = new Size(110, 40);
+        btnNaming.Size = new Size(130, 40);
         btnNaming.Margin = new Padding(0);
         btnNaming.Click += (_, _) => EditNaming();
         UpdateNamingTip();
@@ -405,7 +406,7 @@ public sealed class MainForm : Form
             + "曾遺失：以前用這個程式匯入過，但現在硬碟裡找不到（可能被刪除或搬走），會再複製一次補回來。" + Environment.NewLine
             + "來源資料重複：同一張照片在來源資料裡出現好幾次，只會複製第一份。" + Environment.NewLine
             + "比對看的是檔案內容，在 Google 相簿編輯或旋轉過的照片會被當成新照片。" + Environment.NewLine
-            + "依「檔名規則」改名時，找不到拍攝時間的照片會在「硬碟中對應的檔案」欄註明日期從哪裡來。",
+            + "找不到拍攝時間的照片，會在「硬碟中對應的檔案」欄註明檔名日期從哪裡來、是否放在「日期不明」資料夾。",
             tip, large: true)
         {
             Dock = DockStyle.Fill,
@@ -1448,8 +1449,8 @@ public sealed class MainForm : Form
         {
             return;
         }
-        var outDir = DedupEngine.GetStagingFolder(analysis.BackupRoot, DateTime.Now);
         var naming = settings.Naming.Clone();
+        var outDir = DedupEngine.GetOutputFolder(analysis.BackupRoot, DateTime.Now, naming);
         if (confirm)
         {
             var answer = MessageBox.Show(this,
@@ -1462,6 +1463,7 @@ public sealed class MainForm : Form
                 + (analysis.Count(ItemStatus.DuplicateInBatch) > 0
                     ? $"來源資料重複的 {analysis.Count(ItemStatus.DuplicateInBatch):N0} 張只複製一份，所以張數會比來源資料的檔案數少。" + Environment.NewLine
                     : "")
+                + FolderLine(naming) + Environment.NewLine
                 + NamingLine(naming) + Environment.NewLine
                 + "硬碟裡原本的檔案不會被修改或刪除。",
                 AppTitle, MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
@@ -1488,7 +1490,8 @@ public sealed class MainForm : Form
             if (ShowCopyDoneDialog)
             {
                 MessageBox.Show(this,
-                    $"已複製 {summary.Copied:N0} 張新照片到：" + Environment.NewLine + summary.OutputFolder,
+                    $"已複製 {summary.Copied:N0} 張新照片到：" + Environment.NewLine + summary.OutputFolder
+                    + FolderCountLines(summary, naming),
                     AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
@@ -1772,13 +1775,49 @@ public sealed class MainForm : Form
         settings.Naming = dlg.Result;
         settings.Save();
         UpdateNamingTip();
-        lblStatus.Text = "檔名規則：" + settings.Naming.Describe();
+        lblStatus.Text = "資料夾：" + settings.Naming.DescribeFolders() + "　檔名：" + settings.Naming.Describe();
     }
 
     private void UpdateNamingTip()
     {
-        tip.SetToolTip(btnNaming, "設定複製進「_待整理」的照片要用什麼檔名" + Environment.NewLine
-            + "目前：" + settings.Naming.Describe());
+        tip.SetToolTip(btnNaming, "設定複製進「_待整理」的照片要放在哪個資料夾、用什麼檔名" + Environment.NewLine
+            + "資料夾：" + settings.Naming.DescribeFolders() + Environment.NewLine
+            + "檔名：" + settings.Naming.Describe());
+    }
+
+    /// <summary>複製確認視窗中的資料夾說明。</summary>
+    internal static string FolderLine(NamingOptions naming)
+    {
+        var root = DedupEngine.StagingFolderName;
+        return naming.Folders switch
+        {
+            FolderMode.Year => $"資料夾：依拍攝年份放進「{root}\\2024」這類資料夾，找不到拍攝時間的放「{root}\\{NamingOptions.UnknownDateFolder}」。",
+            FolderMode.YearMonth => $"資料夾：依拍攝年月放進「{root}\\2024\\2024-03」這類資料夾，找不到拍攝時間的放「{root}\\{NamingOptions.UnknownDateFolder}」。",
+            _ => "資料夾：放在今天日期的資料夾（可按「檔名與資料夾…」改成依拍攝年份分資料夾）。",
+        };
+    }
+
+    /// <summary>複製完成提示中各年份的張數（依拍攝日期分資料夾時才列）。</summary>
+    internal static string FolderCountLines(CopySummary summary, NamingOptions naming)
+    {
+        if (!naming.ByShotDate || summary.FolderCounts.Count == 0)
+        {
+            return "";
+        }
+        // 年份＋月份時也只依年份統計，避免列出太多行
+        var byYear = summary.FolderCounts
+            .GroupBy(kv => kv.Key.Split(Path.DirectorySeparatorChar)[0], StringComparer.OrdinalIgnoreCase)
+            .Select(g => (Folder: g.Key, Count: g.Sum(kv => kv.Value)))
+            .OrderBy(x => x.Folder == NamingOptions.UnknownDateFolder)
+            .ThenBy(x => x.Folder, StringComparer.Ordinal)
+            .ToList();
+        const int maxLines = 12;
+        var lines = byYear.Take(maxLines).Select(x => $"　{x.Folder}：{x.Count:N0} 張").ToList();
+        if (byYear.Count > maxLines)
+        {
+            lines.Add($"　…另外 {byYear.Count - maxLines} 個資料夾，共 {byYear.Skip(maxLines).Sum(x => x.Count):N0} 張");
+        }
+        return Environment.NewLine + Environment.NewLine + string.Join(Environment.NewLine, lines);
     }
 
     /// <summary>複製確認視窗中的檔名說明，附範例。</summary>
@@ -1786,7 +1825,7 @@ public sealed class MainForm : Form
     {
         if (!naming.IsActive)
         {
-            return "檔名：保留原檔名（可按「檔名規則…」改成依拍攝日期等方式命名）。";
+            return "檔名：保留原檔名（可按「檔名與資料夾…」改成依拍攝日期等方式命名）。";
         }
         var sample = FileNamer.Samples[0];
         var example = FileNamer.AssignNames(naming, new[] { sample }, _ => false)[0];
