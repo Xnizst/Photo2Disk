@@ -130,7 +130,7 @@ internal sealed class UpdateDialog : Form
         lblHint.AutoSize = true;
         lblHint.ForeColor = Theme.TextGray;
         lblHint.Margin = new Padding(0, 6, 0, 0);
-        lblHint.Text = "完成後會自動重新開啟，備份資料夾、檔名與資料夾等設定都會保留。";
+        lblHint.Text = "完成後會自動重新開啟，備份資料夾與「更多設定」裡的設定都會保留。";
         lblHint.MaximumSize = new Size(430, 0);
 
         var buttons = new FlowLayoutPanel

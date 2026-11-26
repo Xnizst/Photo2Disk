@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 轉檔原型：用 Windows 內建的 WIC（經由 WPF）把 HEIC／DNG 轉成 JPG、PNG，
+       保留 EXIF 與色彩描述檔，並在 XMP 寫入原檔的 SHA-256。 -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Photo2Disk.ConvertProbe</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- UseWPF 會拿掉隱含的 System.IO（避免和 System.Windows.Shapes.Path 衝突） -->
+    <Using Include="System.IO" />
+    <Compile Include="..\..\Photo2Disk\MediaMetadata.cs" Link="Engine\MediaMetadata.cs" />
+    <Compile Include="..\..\Photo2Disk\DngExif.cs" Link="Engine\DngExif.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Sdcb.LibRaw" Version="0.21.1.7" />
+    <PackageReference Include="Sdcb.LibRaw.runtime.win64" Version="0.21.1" />
+  </ItemGroup>
+
+</Project>

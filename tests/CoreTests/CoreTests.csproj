@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <Compile Include="..\..\Photo2Disk\DedupEngine.cs" Link="Engine\DedupEngine.cs" />
+    <Compile Include="..\..\Photo2Disk\BackupSettingsFile.cs" Link="Engine\BackupSettingsFile.cs" />
     <Compile Include="..\..\Photo2Disk\HashIndex.cs" Link="Engine\HashIndex.cs" />
     <Compile Include="..\..\Photo2Disk\ImportHistory.cs" Link="Engine\ImportHistory.cs" />
     <Compile Include="..\..\Photo2Disk\MediaMetadata.cs" Link="Engine\MediaMetadata.cs" />

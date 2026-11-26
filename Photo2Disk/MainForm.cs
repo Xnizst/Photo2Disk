@@ -19,7 +19,7 @@ public sealed class MainForm : Form
 
     private readonly Button btnAnalyze = Ui.MakeButton("▶  開始比對", ButtonKind.Primary);
     private readonly Button btnCopy = Ui.MakeButton("複製新照片", ButtonKind.Outline);
-    private readonly Button btnNaming = Ui.MakeButton("檔名與資料夾…", ButtonKind.Link);
+    private readonly Button btnNaming = Ui.MakeButton("⚙  " + NamingDialog.Title, ButtonKind.Outline);
     private readonly Button btnCancel = Ui.MakeButton("取消", false);
     private readonly ProgressBar progressBar = new();
     private readonly TableLayoutPanel progressArea = new();
@@ -62,13 +62,27 @@ public sealed class MainForm : Form
     private readonly Stopwatch stageWatch = new();
     private readonly Font pillFont = new(Theme.FontName, 9f, FontStyle.Bold);
 
-    // 表格欄位
+    // 表格欄位（YAN 2026-11-26 調整順序：原檔名、修改後檔名、大小、狀態、來源位置；
+    // 原本的「硬碟中對應的檔案」改成滑鼠提示）
     private const int ColCheck = 0;
     private const int ColName = 1;
-    private const int ColLocation = 2;
+    private const int ColNewName = 2;
     private const int ColSize = 3;
     private const int ColStatus = 4;
-    private const int ColMatch = 5;
+    private const int ColLocation = 5;
+
+    /// <summary>勾選、尚未複製的新照片預計的新位置（完整路徑），比對完成、勾選或更多設定改變時重算。</summary>
+    private Dictionary<SourceItem, PlannedName> planned = new();
+
+    /// <summary>來源位置欄右側的兩個圖示按鈕：開啟檔案位置、預覽。</summary>
+    private enum LocationButton
+    {
+        None,
+        Folder,
+        Preview,
+    }
+
+    private (int Row, LocationButton Button) hoverButton = (-1, LocationButton.None);
 
     // 分頁（和舊版下拉選單的順序相同）
     private const int FilterAll = 0;
@@ -81,17 +95,17 @@ public sealed class MainForm : Form
     {
         lstSources = new SourceList(tip);
         sourcesCard = new SectionPanel("來源資料",
-            "可以加入資料夾或 zip 壓縮檔（例如從 Google 相簿下載的 zip），壓縮檔不用先解壓縮。" + Environment.NewLine
+            "可以加入資料夾或 zip 壓縮檔（ex. 從 Google 相簿下載的 zip），壓縮檔不用先解壓縮。" + Environment.NewLine
             + "按右上角「＋ 加入」：選壓縮檔（可一次選多個）；要加入整個資料夾時，進入該資料夾後直接按「開啟」。" + Environment.NewLine
             + "也可以把壓縮檔或資料夾直接拖曳到清單裡，程式會自動判斷。滑鼠移到項目上會顯示完整路徑。",
             tip, large: true)
         {
-            Step = "2",
+            Step = "1",
             FolderGlyph = true,
             Dock = DockStyle.Fill,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Margin = new Padding(6, 0, 0, 0),
+            Margin = new Padding(0, 0, 6, 0),
         };
 
         SuspendLayout();
@@ -217,8 +231,8 @@ public sealed class MainForm : Form
         };
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
-        row.Controls.Add(BuildBackupSection(), 0, 0);
-        row.Controls.Add(BuildSourcesSection(), 1, 0);
+        row.Controls.Add(BuildSourcesSection(), 0, 0);
+        row.Controls.Add(BuildBackupSection(), 1, 0);
         return row;
     }
 
@@ -226,16 +240,16 @@ public sealed class MainForm : Form
     {
         var section = new SectionPanel("備份位置",
             "外接硬碟上放照片的資料夾，裡面的子資料夾也會一起比對。" + Environment.NewLine
-            + "新照片會複製到這個資料夾裡的「_待整理」資料夾（預設依拍攝年份再分資料夾，可按「檔名與資料夾…」更改），" + Environment.NewLine
+            + "新照片會複製到這個資料夾裡的「_待整理」資料夾（預設依拍攝年份再分資料夾，可按「更多設定」更改），" + Environment.NewLine
             + "整理時可以隨意搬移、改名，不影響下次比對。",
             tip, large: true)
         {
-            Step = "1",
+            Step = "2",
             FolderGlyph = true,
             Dock = DockStyle.Fill,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Margin = new Padding(0, 0, 6, 0),
+            Margin = new Padding(6, 0, 0, 0),
         };
         var layout = new TableLayoutPanel
         {
@@ -356,8 +370,9 @@ public sealed class MainForm : Form
         btnCopy.Click += async (_, _) => await CopyAsync(confirm: true);
         tip.SetToolTip(btnAnalyze, "找出來源資料中，哪些已經在硬碟裡（只讀取，不會改動任何檔案）");
         tip.SetToolTip(btnCopy, "把勾選的新照片複製到「_待整理」資料夾");
+        // 原本是底線文字連結，YAN 2026-11-26 回報使用者看不出可以點，改成和「複製新照片」同樣大小的外框按鈕
         btnNaming.AutoSize = false;
-        btnNaming.Size = new Size(130, 40);
+        btnNaming.Size = new Size(160, 40);
         btnNaming.Margin = new Padding(0);
         btnNaming.Click += (_, _) => EditNaming();
         UpdateNamingTip();
@@ -621,24 +636,20 @@ public sealed class MainForm : Form
         check.MinimumWidth = 40;
         check.Resizable = DataGridViewTriState.False;
         grid.Columns.Add(check);
-        grid.Columns.Add(Col("檔案名稱", 200, true, 90));
-        grid.Columns.Add(Col("來源資料中的位置", 200, true, 100));
+        grid.Columns.Add(Col("原檔名", 200, true, 90));
+        grid.Columns.Add(Col("修改後檔名", 200, true, 90));
         var sizeCol = Col("大小", 90);
         sizeCol.DefaultCellStyle.Alignment = DataGridViewContentAlignment.MiddleRight;
         grid.Columns.Add(sizeCol);
         grid.Columns.Add(Col("狀態", 120));
-        grid.Columns.Add(Col("硬碟中對應的檔案", 200, true, 120));
+        grid.Columns.Add(Col("來源位置", 200, true, 120));
 
         grid.CellValueNeeded += Grid_CellValueNeeded;
         grid.CellPainting += Grid_CellPainting;
         grid.CellMouseClick += Grid_CellMouseClick;
-        grid.CellToolTipTextNeeded += (_, e) =>
-        {
-            if (e.ColumnIndex == ColCheck)
-            {
-                e.ToolTipText = e.RowIndex < 0 ? "全選或全部取消（目前列出的新照片）" : "勾選的新照片才會複製";
-            }
-        };
+        grid.CellMouseMove += Grid_CellMouseMove;
+        grid.CellMouseLeave += (_, _) => SetHoverButton(-1, LocationButton.None);
+        grid.CellToolTipTextNeeded += Grid_CellToolTipTextNeeded;
         grid.KeyDown += (_, e) =>
         {
             if (e.KeyCode == Keys.Space)
@@ -654,6 +665,12 @@ public sealed class MainForm : Form
         base.OnShown(e);
         ActiveControl = Directory.Exists(txtBackup.Text) ? btnAdd : btnBrowseBackup;
         Updater.CleanupOldInBackground(Environment.ProcessPath);
+        CleanupPreviewInBackground();
+        // 開程式時記住的備份資料夾也算「選了備份資料夾」，一樣詢問要不要套用裡面的設定
+        if (Directory.Exists(txtBackup.Text))
+        {
+            BeginInvoke(() => OfferBackupSettings(txtBackup.Text));
+        }
         if (settings.CheckForUpdates && AutoCheckUpdates)
         {
             _ = CheckForUpdateAsync();
@@ -693,7 +710,8 @@ public sealed class MainForm : Form
         var fixedWidths = new Dictionary<int, int> { [ColCheck] = 40, [ColSize] = 96, [ColStatus] = 130 };
         foreach (DataGridViewColumn c in grid.Columns)
         {
-            c.MinimumWidth = S(fixedWidths.TryGetValue(c.Index, out var fw) && c.Index == ColCheck ? 40 : 60);
+            // 來源位置欄右側有兩個按鈕，太窄時連一點路徑都看不到
+            c.MinimumWidth = S(c.Index switch { ColCheck => 40, ColLocation => 140, _ => 60 });
             if (fixedWidths.TryGetValue(c.Index, out var w))
             {
                 c.Width = S(w);
@@ -777,21 +795,172 @@ public sealed class MainForm : Form
         e.Value = e.ColumnIndex switch
         {
             ColName => it.FileName,
-            ColLocation => it.Location,
+            ColNewName => NewNameText(it),
             ColSize => DedupEngine.FormatSize(it.Size),
             ColStatus => StatusText(it),
-            ColMatch => MatchText(it),
+            ColLocation => it.Location,
             _ => null,
         };
     }
 
-    private void Grid_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
+    /// <summary>修改後檔名：已複製的顯示實際檔名，勾選中的新照片顯示預計檔名，其他留白（原因在滑鼠提示）。</summary>
+    private string NewNameText(SourceItem it)
     {
-        if (e.Graphics is null || (e.ColumnIndex != ColCheck && e.ColumnIndex != ColStatus))
+        if (it.CopiedTo is not null)
+        {
+            return Path.GetFileName(it.CopiedTo);
+        }
+        return planned.TryGetValue(it, out var p) ? Path.GetFileName(p.Path) : "";
+    }
+
+    /// <summary>重新計算預計檔名（比對完成、勾選改變、更多設定改變、複製後）。</summary>
+    private void UpdatePlan()
+    {
+        planned = analysis is null
+            ? new Dictionary<SourceItem, PlannedName>()
+            : DedupEngine.PlanNames(analysis, settings.Naming, DateTime.Now);
+        grid.Invalidate();
+    }
+
+    /// <summary>
+    /// 每列的滑鼠提示：預計或實際放在哪裡、硬碟裡對應的檔案、曾遺失、來源資料重複的對象、日期註明等
+    /// （原本「硬碟中對應的檔案」欄的內容）。
+    /// </summary>
+    internal string RowTip(SourceItem it)
+    {
+        var lines = new List<string>();
+        if (it.CopiedTo is null && planned.TryGetValue(it, out var p))
+        {
+            lines.Add("預計放在 " + RelativeToBackup(p.Path) + (p.Note is null ? "" : "（" + p.Note + "）"));
+        }
+        if (it.Status == ItemStatus.AlreadyBackedUp)
+        {
+            lines.Add("硬碟裡已有：" + RelativeToBackup(it.MatchedWith));
+        }
+        else if (MatchText(it) is { Length: > 0 } match)
+        {
+            lines.Add(match);
+        }
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private void Grid_CellToolTipTextNeeded(object? sender, DataGridViewCellToolTipTextNeededEventArgs e)
+    {
+        if (e.ColumnIndex == ColCheck)
+        {
+            e.ToolTipText = e.RowIndex < 0 ? "全選或全部取消（目前列出的新照片）" : "勾選的新照片才會複製";
+            return;
+        }
+        if (e.RowIndex < 0 || e.RowIndex >= view.Count)
         {
             return;
         }
-        if (e.RowIndex >= view.Count)
+        var it = view[e.RowIndex];
+        var tipText = RowTip(it);
+        if (e.ColumnIndex == ColLocation)
+        {
+            tipText = it.Location + Environment.NewLine + "右側按鈕：開啟檔案位置／用預設程式預覽"
+                      + (tipText.Length > 0 ? Environment.NewLine + tipText : "");
+        }
+        e.ToolTipText = tipText;
+    }
+
+    /// <summary>來源位置欄右側兩個按鈕的位置（相對於儲存格左上角）。</summary>
+    private (Rectangle Folder, Rectangle Preview) LocationButtonRects(Size cell)
+    {
+        var s = Ui.Scaled(grid, 26);
+        var gap = Ui.Scaled(grid, 2);
+        var right = cell.Width - Ui.Scaled(grid, 6);
+        var top = (cell.Height - s) / 2;
+        var preview = new Rectangle(right - s, top, s, s);
+        var folder = new Rectangle(preview.Left - gap - s, top, s, s);
+        return (folder, preview);
+    }
+
+    private LocationButton HitLocationButton(int row, Point inCell)
+    {
+        if (row < 0 || row >= view.Count)
+        {
+            return LocationButton.None;
+        }
+        var cell = grid.GetCellDisplayRectangle(ColLocation, row, false).Size;
+        var (folder, preview) = LocationButtonRects(cell);
+        return folder.Contains(inCell) ? LocationButton.Folder : preview.Contains(inCell) ? LocationButton.Preview : LocationButton.None;
+    }
+
+    private void Grid_CellMouseMove(object? sender, DataGridViewCellMouseEventArgs e)
+    {
+        var button = e.ColumnIndex == ColLocation ? HitLocationButton(e.RowIndex, e.Location) : LocationButton.None;
+        SetHoverButton(button == LocationButton.None ? -1 : e.RowIndex, button);
+    }
+
+    private void SetHoverButton(int row, LocationButton button)
+    {
+        if (hoverButton == (row, button))
+        {
+            return;
+        }
+        var old = hoverButton;
+        hoverButton = (row, button);
+        grid.Cursor = button == LocationButton.None ? Cursors.Default : Cursors.Hand;
+        if (old.Row >= 0 && old.Row < grid.RowCount)
+        {
+            grid.InvalidateCell(ColLocation, old.Row);
+        }
+        if (row >= 0)
+        {
+            grid.InvalidateCell(ColLocation, row);
+        }
+    }
+
+    private void PaintLocationCell(DataGridViewCellPaintingEventArgs e, Graphics g)
+    {
+        e.Paint(e.ClipBounds, DataGridViewPaintParts.Background | DataGridViewPaintParts.Border | DataGridViewPaintParts.SelectionBackground);
+        var b = e.CellBounds;
+        var (folder, preview) = LocationButtonRects(b.Size);
+        folder.Offset(b.Location);
+        preview.Offset(b.Location);
+        var pad = Ui.Scaled(grid, 8);
+        var textRect = new Rectangle(b.Left + pad, b.Top, Math.Max(0, folder.Left - b.Left - pad - Ui.Scaled(grid, 4)), b.Height);
+        TextRenderer.DrawText(g, view[e.RowIndex].Location, e.CellStyle?.Font ?? grid.Font, textRect, Theme.TextDark,
+            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix
+            | TextFormatFlags.SingleLine);
+
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        foreach (var (rect, kind) in new[] { (folder, LocationButton.Folder), (preview, LocationButton.Preview) })
+        {
+            var hot = hoverButton == (e.RowIndex, kind);
+            if (hot)
+            {
+                using var path = SectionPanel.RoundedRect(rect, Ui.Scaled(grid, 6));
+                using var brush = new SolidBrush(Theme.AccentLight);
+                g.FillPath(brush, path);
+            }
+            var icon = Rectangle.Inflate(rect, -Ui.Scaled(grid, 5), -Ui.Scaled(grid, 6));
+            if (kind == LocationButton.Folder)
+            {
+                Glyphs.Folder(g, icon, hot ? Theme.Accent : Theme.TextGray, false);
+            }
+            else
+            {
+                Glyphs.Picture(g, icon, hot ? Theme.Accent : Theme.TextGray, grid);
+            }
+        }
+    }
+
+    private void Grid_CellPainting(object? sender, DataGridViewCellPaintingEventArgs e)
+    {
+        if (e.Graphics is null || e.RowIndex >= view.Count)
+        {
+            return;
+        }
+        if (e.ColumnIndex == ColLocation && e.RowIndex >= 0)
+        {
+            PaintLocationCell(e, e.Graphics);
+            e.Handled = true;
+            return;
+        }
+        if (e.ColumnIndex != ColCheck && e.ColumnIndex != ColStatus)
         {
             return;
         }
@@ -862,6 +1031,19 @@ public sealed class MainForm : Form
 
     private void Grid_CellMouseClick(object? sender, DataGridViewCellMouseEventArgs e)
     {
+        if (e.ColumnIndex == ColLocation && e.Button == MouseButtons.Left)
+        {
+            switch (HitLocationButton(e.RowIndex, e.Location))
+            {
+                case LocationButton.Folder:
+                    OpenSourceLocation(view[e.RowIndex]);
+                    break;
+                case LocationButton.Preview:
+                    _ = PreviewAsync(view[e.RowIndex]);
+                    break;
+            }
+            return;
+        }
         if (e.ColumnIndex != ColCheck || e.Button != MouseButtons.Left || busy)
         {
             return;
@@ -904,7 +1086,7 @@ public sealed class MainForm : Form
 
     private void AfterSelectionChanged()
     {
-        grid.Invalidate();
+        UpdatePlan(); // 取消勾選的照片不佔流水號，其他照片的預計檔名可能跟著變
         UpdateSelectionLabel();
         UpdateButtons();
     }
@@ -1013,6 +1195,7 @@ public sealed class MainForm : Form
     private void ResetResults()
     {
         analysis = null;
+        planned = new Dictionary<SourceItem, PlannedName>();
         lastOutputFolder = null;
         RefreshGrid();
         tileNew.SetValues("－", "");
@@ -1026,7 +1209,7 @@ public sealed class MainForm : Form
         tabs.SetTab(FilterExisting, "硬碟已有", true);
         tabs.SetTab(FilterDuplicate, "來源資料重複", false);
         tabs.SelectedIndex = FilterAll;
-        lblHint.Text = "選好備份位置、加入來源資料後，按「開始比對」";
+        lblHint.Text = "加入來源資料、選好備份位置後，按「開始比對」";
         lblHint.Visible = true;
         lblSelection.Text = "";
         lblState.Text = "";
@@ -1080,7 +1263,7 @@ public sealed class MainForm : Form
             lblHint.Text = "來源資料裡沒有找到任何照片或影片";
         }
         UpdateSelectionLabel();
-        grid.Invalidate();
+        UpdatePlan();
     }
 
     // ================================================================ 輸入
@@ -1109,7 +1292,44 @@ public sealed class MainForm : Form
         settings.BackupFolder = path;
         settings.Save();
         OnInputsChanged();
+        OfferBackupSettings(path);
     }
+
+    /// <summary>介面測試用：取代詢問視窗，回傳 true 代表套用。</summary>
+    internal Func<string, bool>? ConfirmBackupSettings { get; set; }
+
+    /// <summary>
+    /// 備份資料夾裡有上次複製時存的「更多設定」時，詢問要不要套用（YAN 2026-11-26：每次選備份資料夾都問，
+    /// 設定相同也問，並註明相同）。
+    /// </summary>
+    private void OfferBackupSettings(string backupRoot)
+    {
+        if (!Directory.Exists(backupRoot) || BackupSettingsFile.Load(backupRoot) is not { } file)
+        {
+            return;
+        }
+        var same = BackupSettingsFile.SameAs(file.Naming, settings.Naming);
+        var message = $"這個備份資料夾裡有上次複製時使用的設定（{file.SavedAt:yyyy-MM-dd HH:mm} 儲存）：" + Environment.NewLine
+            + Environment.NewLine + file.Naming.DescribeAll() + Environment.NewLine + Environment.NewLine
+            + (same
+                ? "和目前的設定相同。"
+                : "目前的設定：" + Environment.NewLine + settings.Naming.DescribeAll())
+            + Environment.NewLine + Environment.NewLine + "要套用備份資料夾裡的設定嗎？";
+        var apply = ConfirmBackupSettings?.Invoke(message)
+                    ?? MessageBox.Show(this, message, AppTitle, MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
+        if (!apply)
+        {
+            return;
+        }
+        settings.Naming = file.Naming;
+        settings.Save();
+        UpdateNamingTip();
+        UpdatePlan();
+        lblStatus.Text = "已套用備份資料夾裡的設定。資料夾：" + settings.Naming.DescribeFolders() + "　檔名：" + settings.Naming.Describe();
+    }
+
+    /// <summary>介面測試用：目前的「更多設定」。</summary>
+    internal NamingOptions CurrentNaming => settings.Naming;
 
     /// <summary>檔名欄的預設文字：使用者進入資料夾後直接按「開啟」，就代表要加入這個資料夾。</summary>
     internal const string FolderPlaceholder = "加入這個資料夾";
@@ -1306,7 +1526,9 @@ public sealed class MainForm : Form
         progressBar.Style = ProgressBarStyle.Continuous;
         var fraction = Math.Clamp((double)info.Done / info.Total, 0, 1);
         progressBar.Value = (int)(fraction * 1000);
-        var text = $"{info.Stage} {fraction * 100:0}%（{DedupEngine.FormatSize(info.Done)} / {DedupEngine.FormatSize(info.Total)}）";
+        var text = info.IsCount
+            ? $"{info.Stage} {fraction * 100:0}%（{info.Done:N0} / {info.Total:N0} 張）"
+            : $"{info.Stage} {fraction * 100:0}%（{DedupEngine.FormatSize(info.Done)} / {DedupEngine.FormatSize(info.Total)}）";
         var elapsed = stageWatch.Elapsed.TotalSeconds;
         if (elapsed > 3 && fraction > 0.01 && fraction < 1)
         {
@@ -1465,6 +1687,7 @@ public sealed class MainForm : Form
                     : "")
                 + FolderLine(naming) + Environment.NewLine
                 + NamingLine(naming) + Environment.NewLine
+                + ConvertLine(naming, pending) + Environment.NewLine
                 + "硬碟裡原本的檔案不會被修改或刪除。",
                 AppTitle, MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
             if (answer != DialogResult.OK)
@@ -1480,18 +1703,20 @@ public sealed class MainForm : Form
         var current = analysis;
         try
         {
-            var summary = await Task.Run(() => DedupEngine.CopyNew(current, progress, token, naming));
+            var summary = await Task.Run(() => DedupEngine.CopyNew(current, progress, token, naming, Converter));
             lastOutputFolder = summary.OutputFolder;
             FillProgressBar();
-            lblStatus.Text = $"完成：已複製 {summary.Copied:N0} 張（{DedupEngine.FormatSize(summary.Bytes)}）到 {summary.OutputFolder}";
+            lblStatus.Text = $"完成：已複製 {summary.Copied:N0} 張（{DedupEngine.FormatSize(summary.Bytes)}）到 {summary.OutputFolder}"
+                             + (summary.ConvertCancelled ? "。DNG 轉檔已取消，剩下的沒有轉。" : "");
             lblState.Text = "複製完成";
-            SetStatusColor(Theme.Success);
+            SetStatusColor(summary.ConvertCancelled || summary.ConvertFailed > 0 ? Theme.Amber : Theme.Success);
             ShowSummary(); // 先更新清單再跳提示，提示開著時清單才不會停在複製前的狀態
             if (ShowCopyDoneDialog)
             {
                 MessageBox.Show(this,
                     $"已複製 {summary.Copied:N0} 張新照片到：" + Environment.NewLine + summary.OutputFolder
-                    + FolderCountLines(summary, naming),
+                    + FolderCountLines(summary, naming)
+                    + ConvertResultLines(summary),
                     AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
@@ -1775,14 +2000,14 @@ public sealed class MainForm : Form
         settings.Naming = dlg.Result;
         settings.Save();
         UpdateNamingTip();
+        UpdatePlan();
         lblStatus.Text = "資料夾：" + settings.Naming.DescribeFolders() + "　檔名：" + settings.Naming.Describe();
     }
 
     private void UpdateNamingTip()
     {
-        tip.SetToolTip(btnNaming, "設定複製進「_待整理」的照片要放在哪個資料夾、用什麼檔名" + Environment.NewLine
-            + "資料夾：" + settings.Naming.DescribeFolders() + Environment.NewLine
-            + "檔名：" + settings.Naming.Describe());
+        tip.SetToolTip(btnNaming, "設定複製進「_待整理」的照片要放在哪個資料夾、用什麼檔名、要不要轉檔" + Environment.NewLine
+            + settings.Naming.DescribeAll());
     }
 
     /// <summary>複製確認視窗中的資料夾說明。</summary>
@@ -1791,18 +2016,61 @@ public sealed class MainForm : Form
         var root = DedupEngine.StagingFolderName;
         return naming.Folders switch
         {
-            FolderMode.Year => $"資料夾：依拍攝年份放進「{root}\\2024」這類資料夾，找不到拍攝時間的放「{root}\\{NamingOptions.UnknownDateFolder}」。",
-            FolderMode.YearMonth => $"資料夾：依拍攝年月放進「{root}\\2024\\2024-03」這類資料夾，找不到拍攝時間的放「{root}\\{NamingOptions.UnknownDateFolder}」。",
-            _ => "資料夾：放在今天日期的資料夾（可按「檔名與資料夾…」改成依拍攝年份分資料夾）。",
+            FolderMode.Year => $"資料夾：依拍攝年份分資料夾（ex. {root}\\2024），找不到拍攝時間的放「{root}\\{NamingOptions.UnknownDateFolder}」。",
+            FolderMode.YearMonth => $"資料夾：依拍攝年份\\年份-月份分資料夾（ex. {root}\\2024\\2024-03），找不到拍攝時間的放「{root}\\{NamingOptions.UnknownDateFolder}」。",
+            FolderMode.YearThenMonth => $"資料夾：依拍攝年份\\月份分資料夾（ex. {root}\\2024\\03），找不到拍攝時間的放「{root}\\{NamingOptions.UnknownDateFolder}」。",
+            _ => "資料夾：放在今天日期的資料夾（可按「更多設定」改成依拍攝年份分資料夾）。",
         };
+    }
+
+    /// <summary>實際轉檔用的轉檔器；介面測試可換掉。</summary>
+    internal IRawConverter Converter { get; set; } = new DngConverter();
+
+    /// <summary>複製確認視窗的轉檔說明。</summary>
+    internal static string ConvertLine(NamingOptions naming, IReadOnlyCollection<SourceItem> pending)
+    {
+        var dng = pending.Count(i => DedupEngine.IsDng(i.FileName));
+        if (!naming.ConvertDng)
+        {
+            return dng > 0 ? $"DNG 轉檔：不轉檔（這次有 {dng:N0} 張 DNG，可在「更多設定」開啟）" : "DNG 轉檔：不轉檔";
+        }
+        return dng > 0
+            ? $"DNG 轉檔：{dng:N0} 張 DNG 另存 JPG（每張約 1～3 秒，原檔照常保留）"
+            : "DNG 轉檔：開啟（這次沒有 DNG）";
+    }
+
+    /// <summary>複製完成提示的轉檔結果。</summary>
+    internal static string ConvertResultLines(CopySummary s)
+    {
+        if (s.Converted + s.ConvertFailed + s.ConvertSkipped == 0 && !s.ConvertCancelled)
+        {
+            return "";
+        }
+        var lines = new List<string> { $"DNG 另存 JPG：{s.Converted:N0} 張" };
+        if (s.ConvertSkipped > 0)
+        {
+            lines.Add($"已有相機直出 JPG、不另外轉：{s.ConvertSkipped:N0} 張");
+        }
+        if (s.ConvertFailed > 0)
+        {
+            lines.Add($"轉檔失敗：{s.ConvertFailed:N0} 張（原因見比對結果清單，DNG 原檔已複製）");
+        }
+        if (s.ConvertCancelled)
+        {
+            lines.Add("轉檔已取消，剩下的 DNG 沒有轉（原檔已複製）");
+        }
+        return Environment.NewLine + Environment.NewLine + string.Join(Environment.NewLine, lines);
     }
 
     /// <summary>複製完成提示中各年份的張數（依拍攝日期分資料夾時才列）。</summary>
     internal static string FolderCountLines(CopySummary summary, NamingOptions naming)
     {
+        var beside = summary.NextToBackedUpVideo > 0
+            ? $"{Environment.NewLine}　放在硬碟裡已有的影片旁：{summary.NextToBackedUpVideo:N0} 個字幕檔"
+            : "";
         if (!naming.ByShotDate || summary.FolderCounts.Count == 0)
         {
-            return "";
+            return beside.Length > 0 ? Environment.NewLine + beside : "";
         }
         // 年份＋月份時也只依年份統計，避免列出太多行
         var byYear = summary.FolderCounts
@@ -1817,7 +2085,7 @@ public sealed class MainForm : Form
         {
             lines.Add($"　…另外 {byYear.Count - maxLines} 個資料夾，共 {byYear.Skip(maxLines).Sum(x => x.Count):N0} 張");
         }
-        return Environment.NewLine + Environment.NewLine + string.Join(Environment.NewLine, lines);
+        return Environment.NewLine + Environment.NewLine + string.Join(Environment.NewLine, lines) + beside;
     }
 
     /// <summary>複製確認視窗中的檔名說明，附範例。</summary>
@@ -1825,11 +2093,11 @@ public sealed class MainForm : Form
     {
         if (!naming.IsActive)
         {
-            return "檔名：保留原檔名（可按「檔名與資料夾…」改成依拍攝日期等方式命名）。";
+            return "檔名：保留原檔名（可按「更多設定」改成依拍攝日期等方式命名）。";
         }
         var sample = FileNamer.Samples[0];
         var example = FileNamer.AssignNames(naming, new[] { sample }, _ => false)[0];
-        return $"檔名：依「{naming.Describe()}」改名，例如 {sample.OriginalName} → {example}";
+        return $"檔名：依「{naming.Describe()}」改名（ex. {sample.OriginalName} → {example}）";
     }
 
     // ================================================================ 匯出與開啟
@@ -1853,12 +2121,12 @@ public sealed class MainForm : Form
         try
         {
             using var w = new StreamWriter(dlg.FileName, false, new UTF8Encoding(true));
-            w.WriteLine("狀態,勾選,檔名,大小(位元組),來源資料中的位置,硬碟中對應的檔案");
+            w.WriteLine("狀態,勾選,原檔名,修改後檔名,大小(位元組),來源位置,備註");
             foreach (var it in analysis.Items)
             {
                 w.WriteLine(string.Join(",",
-                    Csv(StatusText(it)), IsSelectable(it) ? (it.Excluded ? "否" : "是") : "", Csv(it.FileName), it.Size.ToString(),
-                    Csv(it.Location), Csv(MatchText(it))));
+                    Csv(StatusText(it)), IsSelectable(it) ? (it.Excluded ? "否" : "是") : "", Csv(it.FileName),
+                    Csv(NewNameText(it)), it.Size.ToString(), Csv(it.Location), Csv(RowTip(it).Replace(Environment.NewLine, "；"))));
             }
             lblStatus.Text = "已匯出：" + dlg.FileName;
         }
@@ -1867,6 +2135,137 @@ public sealed class MainForm : Form
             MessageBox.Show(this, "無法寫入檔案（可能正在用 Excel 開啟）：" + Environment.NewLine + ex.Message,
                 AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
+    }
+
+    /// <summary>預覽用的暫存資料夾（zip 裡的檔案解到這裡再開），程式啟動時清掉上次留下的。</summary>
+    internal static readonly string PreviewRoot = Path.Combine(Path.GetTempPath(), "Photo2Disk_preview");
+
+    /// <summary>介面測試用：攔截開啟檔案位置與預覽，不真的開檔案總管或其他程式。</summary>
+    internal Action<string, string>? ShellOverride { get; set; }
+
+    /// <summary>介面測試用：表格儲存格的文字。</summary>
+    internal string CellText(int row, int column) =>
+        row >= 0 && row < view.Count ? grid.Rows[row].Cells[column].FormattedValue?.ToString() ?? "" : "";
+
+    internal static int NewNameColumn => ColNewName;
+
+    /// <summary>介面測試用：不開視窗直接套用更多設定。</summary>
+    internal void ApplyNaming(NamingOptions naming)
+    {
+        settings.Naming = naming;
+        UpdateNamingTip();
+        UpdatePlan();
+    }
+
+    /// <summary>介面測試用：按來源位置欄的資料夾或預覽按鈕。</summary>
+    internal Task ClickLocationButtonAsync(int row, bool preview)
+    {
+        if (row < 0 || row >= view.Count)
+        {
+            return Task.CompletedTask;
+        }
+        if (!preview)
+        {
+            OpenSourceLocation(view[row]);
+            return Task.CompletedTask;
+        }
+        return PreviewAsync(view[row]);
+    }
+
+    /// <summary>介面測試用：讓按鈕顯示滑鼠移上去的樣子（截圖用）。</summary>
+    internal void HoverLocationButton(int row, bool preview) =>
+        SetHoverButton(row, preview ? LocationButton.Preview : LocationButton.Folder);
+
+    /// <summary>在檔案總管選取來源檔案；zip 裡的檔案選取那個 zip（Windows 無法直接選取 zip 內的檔案）。</summary>
+    private void OpenSourceLocation(SourceItem it)
+    {
+        if (!File.Exists(it.SourcePath))
+        {
+            MessageBox.Show(this, "找不到來源檔案，可能已被移動或刪除：" + Environment.NewLine + it.SourcePath,
+                AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        if (ShellOverride is { } fake)
+        {
+            fake("select", it.SourcePath);
+            return;
+        }
+        Process.Start("explorer.exe", $"/select,\"{it.SourcePath}\"");
+    }
+
+    /// <summary>用 Windows 預設程式開啟；zip 裡的檔案先解到暫存資料夾。</summary>
+    private async Task PreviewAsync(SourceItem it)
+    {
+        string path;
+        try
+        {
+            if (it.IsZipEntry)
+            {
+                lblStatus.Text = "正在準備預覽：" + it.FileName;
+                var dir = Path.Combine(PreviewRoot, Guid.NewGuid().ToString("N"));
+                path = await Task.Run(() => DedupEngine.ExtractEntry(it, dir));
+            }
+            else
+            {
+                path = it.SourcePath;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or UserFacingException)
+        {
+            MessageBox.Show(this, "無法讀取這個檔案：" + Environment.NewLine + ex.Message, AppTitle,
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        if (!File.Exists(path))
+        {
+            MessageBox.Show(this, "找不到來源檔案，可能已被移動或刪除：" + Environment.NewLine + path,
+                AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        if (ShellOverride is { } fake)
+        {
+            fake("open", path);
+            return;
+        }
+        try
+        {
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+            lblStatus.Text = "已用預設程式開啟：" + it.FileName;
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            MessageBox.Show(this,
+                $"這台電腦沒有可以開啟「{Path.GetExtension(path)}」的程式。" + Environment.NewLine
+                + "HEIC 需要安裝 HEIF／HEVC 擴充功能；DNG 需要相片檢視程式支援 RAW。",
+                AppTitle, MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+    }
+
+    /// <summary>清掉上次預覽留下的暫存檔（還開著的檔案刪不掉就略過）。</summary>
+    private static void CleanupPreviewInBackground()
+    {
+        Task.Run(() =>
+        {
+            try
+            {
+                if (Directory.Exists(PreviewRoot))
+                {
+                    foreach (var d in Directory.EnumerateDirectories(PreviewRoot))
+                    {
+                        try
+                        {
+                            Directory.Delete(d, true);
+                        }
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                        {
+                        }
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+            }
+        });
     }
 
     /// <summary>比對完成後的重複提示：張數、前幾組重複的檔案。</summary>

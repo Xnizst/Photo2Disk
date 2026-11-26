@@ -585,6 +585,34 @@ internal static class Glyphs
         }
     }
 
+    /// <summary>圖片（外框＋山＋太陽），結果清單的預覽按鈕用。</summary>
+    public static void Picture(Graphics g, Rectangle r, Color color, Control c)
+    {
+        var w = Math.Max(1.5f, r.Height / 9f);
+        using var pen = new Pen(color, w) { LineJoin = LineJoin.Round };
+        using (var frame = SectionPanel.RoundedRect(r, Ui.Scaled(c, 2)))
+        {
+            g.DrawPath(pen, frame);
+        }
+        using var brush = new SolidBrush(color);
+        // 山：左邊大三角、右邊小三角，底邊貼著外框
+        var bottom = r.Bottom - w;
+        g.FillPolygon(brush, new[]
+        {
+            new PointF(r.Left + w, bottom),
+            new PointF(r.Left + r.Width * 0.38f, r.Top + r.Height * 0.42f),
+            new PointF(r.Left + r.Width * 0.66f, bottom),
+        });
+        g.FillPolygon(brush, new[]
+        {
+            new PointF(r.Left + r.Width * 0.5f, bottom),
+            new PointF(r.Left + r.Width * 0.7f, r.Top + r.Height * 0.6f),
+            new PointF(r.Right - w, bottom),
+        });
+        var d = r.Height * 0.22f;
+        g.FillEllipse(brush, r.Right - r.Width * 0.3f - d / 2, r.Top + r.Height * 0.28f - d / 2, d, d);
+    }
+
     public static void Zip(Graphics g, Rectangle r, Control c)
     {
         var body = new Rectangle(r.Left + r.Width / 8, r.Top - 1, r.Width * 3 / 4, r.Height + 2);

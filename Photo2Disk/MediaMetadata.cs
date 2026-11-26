@@ -32,6 +32,38 @@ public static partial class MediaMetadata
 
     public static bool IsVideo(string fileName) => VideoExtensions.Contains(Path.GetExtension(fileName));
 
+    /// <summary>字幕檔（DJI 空拍機、雲台相機錄影時同時產生，逐格記錄拍攝參數），要跟同名影片放在一起。</summary>
+    public static bool IsSubtitle(string fileName) => Path.GetExtension(fileName).Equals(".srt", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// DJI 的 SRT 每一格都有拍攝時間（例：「2023-10-05 20:56:20,015,053」，當地時間），取第一筆當作錄影開始時間。
+    /// 一般影片字幕沒有日期，回傳 null。
+    /// </summary>
+    private static DateTime? ReadSrtDate(Stream s)
+    {
+        var buf = new byte[8 * 1024];
+        var n = ReadFully(s, buf, 0, buf.Length);
+        var m = SrtDateRegex().Match(Encoding.UTF8.GetString(buf, 0, n));
+        if (!m.Success)
+        {
+            return null;
+        }
+        var g = m.Groups;
+        try
+        {
+            var d = new DateTime(int.Parse(g[1].Value), int.Parse(g[2].Value), int.Parse(g[3].Value),
+                int.Parse(g[4].Value), int.Parse(g[5].Value), int.Parse(g[6].Value));
+            return IsPlausible(d) ? d : null;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return null;
+        }
+    }
+
+    [GeneratedRegex(@"(?<!\d)(\d{4})[-./](\d{2})[-./](\d{2})[ T](\d{2}):(\d{2}):(\d{2})")]
+    private static partial Regex SrtDateRegex();
+
     /// <summary>讀取本機檔案；originalName 用來從檔名找日期，fileTime 是最後的備案。</summary>
     public static MediaInfo Read(string path, string originalName, DateTime fileTime)
     {
@@ -41,7 +73,11 @@ public static partial class MediaMetadata
         try
         {
             using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 64 * 1024);
-            (taken, model, source) = ReadEmbedded(fs);
+            (taken, model, source) = IsSubtitle(originalName) ? (ReadSrtDate(fs), null, DateSource.Video) : ReadEmbedded(fs);
+            if (taken is null)
+            {
+                source = DateSource.None;
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException
                                        or ArgumentException or OverflowException or IndexOutOfRangeException)
@@ -104,6 +140,40 @@ public static partial class MediaMetadata
         }
         var (date, model) = ParseTiff(tiff);
         return (date, model, date is null ? DateSource.None : DateSource.Exif);
+    }
+
+    /// <summary>
+    /// 取出檔案內嵌的 EXIF 原始區塊（從 TIFF 標頭開始），供轉檔時原樣寫進新檔案。
+    /// 支援 JPEG、PNG、HEIC；DNG 的 IFD0 混有 RAW 專用欄位，不能直接搬，回傳 null。
+    /// </summary>
+    internal static byte[]? ReadExifBlock(string path)
+    {
+        using var s = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 64 * 1024);
+        var head = new byte[16];
+        if (ReadFully(s, head, 0, head.Length) < 12)
+        {
+            return null;
+        }
+        s.Position = 0;
+        if (head[0] == 0xFF && head[1] == 0xD8)
+        {
+            return ReadJpegExif(s);
+        }
+        if (head[0] == 0x89 && head[1] == 'P' && head[2] == 'N' && head[3] == 'G')
+        {
+            return ReadPngExif(s);
+        }
+        if (Encoding.ASCII.GetString(head, 4, 4) == "ftyp")
+        {
+            foreach (var box in Boxes(s, 0, s.Length).ToList())
+            {
+                if (box.Type == "meta" && box.End - box.DataStart <= MaxBlock)
+                {
+                    return ReadHeifExif(s, box);
+                }
+            }
+        }
+        return null;
     }
 
     // ------------------------------------------------------------ JPEG

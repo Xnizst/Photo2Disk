@@ -402,6 +402,58 @@ try
     badSettings.Normalize();
     Check(badSettings.Folders == FolderMode.Year, "資料夾設定值不合法 → 依拍攝年份");
 
+    // ---- 年份\月份分層、日期精度＋日期分隔、@ 與自訂分隔符號（2026-11-26）
+    var shot = new MediaInfo(new DateTime(2023, 7, 10, 8, 5, 9), DateSource.Exif, "DJI");
+    Check(new NamingOptions { Folders = FolderMode.YearMonth }.SubFolderFor(shot, DateTime.Now) == @"2023\2023-07", "年份\\年份-月份");
+    Check(new NamingOptions { Folders = FolderMode.YearThenMonth }.SubFolderFor(shot, DateTime.Now) == @"2023\07", "年份\\月份");
+    var monthOnly = System.Text.Json.JsonSerializer.Deserialize<NamingOptions>(
+        System.Text.Json.JsonSerializer.Serialize(new NamingOptions { Folders = FolderMode.YearThenMonth }))!;
+    monthOnly.Normalize();
+    Check(monthOnly.Folders == FolderMode.YearThenMonth, "年份\\月份設定可存回");
+    foreach (var oldFormat in new[] { "yyyy-MM", "yyyy-MM-dd", "yyyyMMdd_HHmmss", "yyyy年MM月", "yyyy年MM月dd日", "yyyy" })
+    {
+        var o = new NamingOptions { DateFormat = oldFormat };
+        o.Normalize();
+        Check(o.DateFormat == oldFormat, "舊版日期格式保留：" + oldFormat);
+    }
+    var expectedDates = new (DatePrecision P, string S, string Text)[]
+    {
+        (DatePrecision.Day, "", "20230710"),
+        (DatePrecision.Day, ".", "2023.07.10"),
+        (DatePrecision.Day, "_", "2023_07_10"),
+        (DatePrecision.YearMonth, "", "202307"),
+        (DatePrecision.DayTime, "-", "2023-07-10_080509"),
+        (DatePrecision.DayTime, NamingOptions.ChineseDateStyle, "2023年07月10日08時05分09秒"),
+        (DatePrecision.Year, ".", "2023"),
+    };
+    foreach (var (p, s, text) in expectedDates)
+    {
+        var fmt = NamingOptions.BuildDateFormat(p, s);
+        var got = shot.Taken!.Value.ToString(fmt, System.Globalization.CultureInfo.InvariantCulture);
+        Check(got == text, $"日期格式 {p}/{s} → {got}");
+        Check(NamingOptions.TryParseDateFormat(fmt, out var p2, out var s2) && NamingOptions.BuildDateFormat(p2, s2) == fmt, "日期格式可拆回：" + fmt);
+    }
+    var badDate = new NamingOptions { DateFormat = "dd/MM/yyyy" };
+    badDate.Normalize();
+    Check(badDate.DateFormat == "yyyy-MM", "不在組合範圍內的日期格式 → 年月");
+    Check(NamingOptions.DateStyleLabel("", "不隔開") == "不隔開（ex. 20240315）", "日期分隔選項文字：" + NamingOptions.DateStyleLabel("", "不隔開"));
+
+    var at = new NamingOptions();
+    at.Apply(NamingOptions.Presets.Single(x => x.Name == "拍攝日期@原檔名"));
+    var atNames = FileNamer.AssignNames(at, new[] { new NameInput("DJI_0755.DNG", shot, "") }, _ => false);
+    Check(atNames.Single() == "20230710@DJI_0755.DNG", "同學回報的命名方式：" + atNames.Single());
+    Check(at.MatchingPreset()?.Name == "拍攝日期@原檔名" && at.Describe() == "拍攝日期@原檔名", "@ 組合的說明：" + at.Describe());
+
+    var custom = new NamingOptions { Enabled = true, DateFormat = "yyyyMMdd", Separator = "#~" };
+    custom.Normalize();
+    Check(custom.Separator == "#~", "自訂分隔符號保留");
+    Check(FileNamer.AssignNames(custom, new[] { new NameInput("DJI_0755.DNG", shot, "") }, _ => false).Single() == "20230710#~DJI_0755.DNG", "自訂分隔符號套用");
+    Check(NamingOptions.CleanSeparator("a/b:c*d?ef") == "abcde", "自訂分隔符號拿掉不合法字元並限制 5 字：" + NamingOptions.CleanSeparator("a/b:c*d?ef"));
+    var joined = new NamingOptions { Enabled = true, DateFormat = "yyyyMMdd", Separator = "" };
+    joined.Normalize();
+    Check(FileNamer.AssignNames(joined, new[] { new NameInput("DJI_0755.DNG", shot, "") }, _ => false).Single() == "20230710DJI_0755.DNG"
+          && joined.Describe() == "拍攝日期＋原檔名", "不隔開：" + joined.Describe());
+
     string Staging(string root) => Path.Combine(root, DedupEngine.StagingFolderName);
     List<string> RelFiles(string root) => Directory.EnumerateFiles(Staging(root), "*", SearchOption.AllDirectories)
         .Select(f => Path.GetRelativePath(Staging(root), f)).OrderBy(x => x, StringComparer.Ordinal).ToList();
@@ -437,7 +489,27 @@ try
     var namingM = new NamingOptions();
     namingM.Apply(NamingOptions.Presets.Single(x => x.Name == "拍攝日期-流水號"));
     namingM.Folders = FolderMode.YearMonth;
+    Check(rm.Items.Where(i => i.Status == ItemStatus.New).All(i => i.Media is not null), "比對時已讀好新照片的拍攝資訊");
+    Check(rm.Items.Single(i => i.FileName == "IMG_1234.jpg").Media?.Source == DateSource.Exif, "zip 內照片的 EXIF 在比對時讀到");
+    var planM = DedupEngine.PlanNames(rm, namingM, DateTime.Now);
     DedupEngine.CopyNew(rm, null, CancellationToken.None, namingM);
+    var planMismatch = rm.Items.Where(i => i.CopiedTo is not null && planM.GetValueOrDefault(i)?.Path != i.CopiedTo)
+        .Select(i => $"{i.FileName}: 預計 {planM.GetValueOrDefault(i)?.Path}，實際 {i.CopiedTo}").ToList();
+    Check(planM.Count == 5 && planMismatch.Count == 0, "預計檔名與實際複製結果相同" + string.Join("；", planMismatch));
+
+    // ---- 複製時把這次用的更多設定存進備份資料夾（隱藏檔），不算進備份檔案
+    var settingsPath = BackupSettingsFile.PathOf(backupM);
+    var savedM = BackupSettingsFile.Load(backupM);
+    Check(savedM is not null && BackupSettingsFile.SameAs(savedM.Naming, namingM) && savedM.SavedAt > DateTime.Now.AddMinutes(-5),
+        "複製後備份資料夾裡有這次的設定");
+    Check((File.GetAttributes(settingsPath) & FileAttributes.Hidden) != 0, "設定檔為隱藏檔");
+    Check(!BackupSettingsFile.SameAs(savedM!.Naming, new NamingOptions()), "設定不同時判斷為不同");
+    var againM = DedupEngine.Analyze(backupM, new[] { takeout }, null, CancellationToken.None);
+    Check(againM.BackupFileCount == 5 && againM.Count(ItemStatus.AlreadyBackedUp) == 5, $"設定檔不算進備份檔案（{againM.BackupFileCount}）");
+    File.SetAttributes(settingsPath, FileAttributes.Normal);
+    File.WriteAllText(settingsPath, "{壞掉的內容");
+    Check(BackupSettingsFile.Load(backupM) is null, "設定檔損壞時當作沒有");
+    Check(BackupSettingsFile.Load(Path.Combine(work2, "不存在")) is null, "沒有設定檔時回傳 null");
     var gotM = RelFiles(backupM);
     var vm = videoLocal.ToString("yyyy") + @"\" + videoLocal.ToString("yyyy-MM") + @"\" + videoLocal.ToString("yyyy-MM-dd") + "-001.mp4";
     var expectedM = new[]
@@ -460,6 +532,142 @@ try
     Check(File.ReadAllBytes(Path.Combine(y2, "IMG_1234.jpg")).AsSpan().SequenceEqual(squatter)
           && File.ReadAllBytes(Path.Combine(y2, "IMG_1234 (2).jpg")).AsSpan().SequenceEqual(jpgLe),
         "年份資料夾已有同名檔案：新照片加 (2)，原檔不變");
+
+    // ---- 字幕檔（DJI 的 SRT）跟同名影片放在同一個資料夾、沿用影片的新檔名
+    var drone = Path.Combine(work2, "空拍下載");
+    Directory.CreateDirectory(drone);
+    var droneUtc = new DateTime(2023, 10, 5, 12, 56, 20, DateTimeKind.Utc);
+    var droneLocal = droneUtc.ToLocalTime();
+    File.WriteAllBytes(Path.Combine(drone, "DJI_0001.MP4"), MakeMp4(droneUtc, Bytes(40_000)));
+    string Srt(string date) =>
+        $"1\r\n00:00:00,000 --> 00:00:00,033\r\n<font size=\"36\">SrtCnt : 1, DiffTime : 33ms\r\n{date},015,053\r\n[iso : 250] [shutter : 1/30.0]\r\n</font>\r\n";
+    File.WriteAllText(Path.Combine(drone, "DJI_0001.SRT"), Srt("2023-10-05 20:56:20"));
+    File.WriteAllText(Path.Combine(drone, "DJI_0002.SRT"), Srt("2022-06-01 08:00:00")); // 影片不在這批
+    File.WriteAllText(Path.Combine(drone, "movie.srt"), "1\r\n00:00:01,000 --> 00:00:02,000\r\n你好\r\n"); // 一般字幕，沒有日期
+    File.SetLastWriteTime(Path.Combine(drone, "movie.srt"), new DateTime(2021, 1, 1, 9, 0, 0));
+    Check(MediaMetadata.Read(Path.Combine(drone, "DJI_0002.SRT"), "DJI_0002.SRT", DateTime.MinValue)
+            is { Taken: var srtTaken, Source: DateSource.Video } && srtTaken == new DateTime(2022, 6, 1, 8, 0, 0),
+        "SRT 讀出第一筆拍攝時間");
+
+    var backupS = Path.Combine(work2, "硬碟S", "照片");
+    Directory.CreateDirectory(backupS);
+    var rs = DedupEngine.Analyze(backupS, new[] { drone }, null, CancellationToken.None);
+    var namingS = new NamingOptions();
+    namingS.Apply(NamingOptions.Presets.Single(x => x.Name == "拍攝日期-流水號"));
+    namingS.Folders = FolderMode.Year;
+    var planS = DedupEngine.PlanNames(rs, namingS, DateTime.Now);
+    DedupEngine.CopyNew(rs, null, CancellationToken.None, namingS);
+    Check(rs.Items.Where(i => i.CopiedTo is not null).All(i => planS.GetValueOrDefault(i)?.Path == i.CopiedTo),
+        "字幕跟影片：預計位置與實際相同");
+    var videoStem = droneLocal.ToString("yyyy") + @"\" + droneLocal.ToString("yyyy-MM-dd") + "-001";
+    var expectedS = new[]
+    {
+        videoStem + ".MP4", videoStem + ".SRT", @"2022\2022-06-01-001.SRT",
+        NamingOptions.UnknownDateFolder + @"\2021-01-01-001.srt",
+    }.OrderBy(x => x, StringComparer.Ordinal).ToList();
+    var gotS = RelFiles(backupS);
+    Check(gotS.SequenceEqual(expectedS), "字幕跟影片同資料夾同檔名、不佔流水號：" + string.Join("、", gotS));
+    Check(rs.Items.Single(i => i.FileName == "DJI_0001.SRT").NameNote == $"與影片 {Path.GetFileName(videoStem)}.MP4 放在一起",
+        "字幕註明跟哪支影片放在一起");
+    var againS = DedupEngine.Analyze(backupS, new[] { drone }, null, CancellationToken.None);
+    Check(againS.Count(ItemStatus.AlreadyBackedUp) == 4, "字幕改名搬移後再比對：全部硬碟已有");
+
+    // 保留原檔名、依年份：字幕仍跟影片同一個資料夾（不會被分到 SRT 自己的日期）
+    var backupS2 = Path.Combine(work2, "硬碟S2", "照片");
+    Directory.CreateDirectory(backupS2);
+    File.WriteAllText(Path.Combine(drone, "DJI_0001.SRT"), Srt("2019-01-01 00:00:00")); // 故意和影片不同年
+    var rs2 = DedupEngine.Analyze(backupS2, new[] { drone }, null, CancellationToken.None);
+    DedupEngine.CopyNew(rs2, null, CancellationToken.None, new NamingOptions { Folders = FolderMode.Year });
+    var gotS2 = RelFiles(backupS2);
+    Check(gotS2.Contains(droneLocal.ToString("yyyy") + @"\DJI_0001.MP4") && gotS2.Contains(droneLocal.ToString("yyyy") + @"\DJI_0001.SRT"),
+        "保留原檔名：字幕跟影片同資料夾：" + string.Join("、", gotS2));
+
+    // 影片已經在備份資料夾裡（使用者改名整理過）→ 字幕放到那支影片旁邊，檔名跟著影片
+    var drone3 = Path.Combine(work2, "空拍下載3");
+    Directory.CreateDirectory(drone3);
+    var video3 = MakeMp4(droneUtc.AddDays(1), Bytes(45_000));
+    File.WriteAllBytes(Path.Combine(drone3, "DJI_0003.MP4"), video3);
+    File.WriteAllText(Path.Combine(drone3, "DJI_0003.SRT"), Srt("2023-10-06 20:56:20"));
+    var backupS3 = Path.Combine(work2, "硬碟S3", "照片");
+    var userFolder = Path.Combine(backupS3, "2023 空拍");
+    Directory.CreateDirectory(userFolder);
+    File.WriteAllBytes(Path.Combine(userFolder, "飛行紀錄.MP4"), video3);
+    var rs3 = DedupEngine.Analyze(backupS3, new[] { drone3 }, null, CancellationToken.None);
+    Check(rs3.Items.Single(i => i.FileName == "DJI_0003.MP4").Status == ItemStatus.AlreadyBackedUp, "影片已在硬碟（改名整理過）→ 硬碟已有");
+    var planS3 = DedupEngine.PlanNames(rs3, namingS, DateTime.Now);
+    var cs3 = DedupEngine.CopyNew(rs3, null, CancellationToken.None, namingS);
+    Check(rs3.Items.Where(i => i.CopiedTo is not null).All(i => planS3.GetValueOrDefault(i)?.Path == i.CopiedTo),
+        "字幕放到硬碟已有的影片旁：預計位置與實際相同");
+    Check(File.Exists(Path.Combine(userFolder, "飛行紀錄.SRT"))
+          && !Directory.EnumerateFiles(Staging(backupS3), "*", SearchOption.AllDirectories).Any(),
+        "字幕放到硬碟裡那支影片旁邊、檔名跟著影片，沒有放進「_待整理」");
+    Check(cs3.Copied == 1 && cs3.NextToBackedUpVideo == 1 && cs3.FolderCounts.Count == 0, "完成摘要：1 個字幕放在已有的影片旁");
+    Check(rs3.Items.Single(i => i.FileName == "DJI_0003.SRT").NameNote == @"放在硬碟裡已有的影片 2023 空拍\飛行紀錄.MP4 旁邊",
+        "字幕註明放在哪支影片旁邊");
+    var againS3 = DedupEngine.Analyze(backupS3, new[] { drone3 }, null, CancellationToken.None);
+    Check(againS3.Count(ItemStatus.AlreadyBackedUp) == 2, "再比對：影片與字幕都是硬碟已有");
+
+    // ---- DNG 轉檔（用假的轉檔器測流程；真實轉檔品質由 tests\ConvertProbe 驗證）
+    var cam = Path.Combine(work2, "相機下載");
+    Directory.CreateDirectory(cam);
+    byte[] FakeDng() => new byte[] { (byte)'I', (byte)'I', 42, 0 }.Concat(Bytes(30_000)).ToArray();
+    File.WriteAllBytes(Path.Combine(cam, "CAM_0001.DNG"), FakeDng());
+    File.WriteAllBytes(Path.Combine(cam, "CAM_0002.DNG"), FakeDng());
+    File.WriteAllBytes(Path.Combine(cam, "CAM_0002.JPG"), MakeJpeg(null, Bytes(20_000))); // 相機同時拍的 JPG
+    File.WriteAllBytes(Path.Combine(cam, "CAM_0003.DNG"), FakeDng());
+    var calls = new List<RawSourceInfo>();
+    var fake = new FakeConverter((rawPath, outPath, info) =>
+    {
+        calls.Add(info);
+        if (info.Name == "CAM_0003.DNG")
+        {
+            File.WriteAllBytes(outPath, new byte[] { 1 }); // 寫到一半失敗
+            throw new InvalidDataException("模擬的解碼錯誤");
+        }
+        Check(File.Exists(rawPath), "轉檔時讀的是已複製到備份資料夾的 DNG");
+        File.WriteAllBytes(outPath, MakeJpeg(null, Bytes(5_000)));
+        return RawConvertMethod.MatchedToPreview;
+    });
+    var backupD = Path.Combine(work2, "硬碟D", "照片");
+    Directory.CreateDirectory(backupD);
+    var rd = DedupEngine.Analyze(backupD, new[] { cam }, null, CancellationToken.None);
+    var cd = DedupEngine.CopyNew(rd, null, CancellationToken.None, new NamingOptions { ConvertDng = true }, fake);
+    var unknown = Path.Combine(Staging(backupD), NamingOptions.UnknownDateFolder);
+    Check(File.Exists(Path.Combine(unknown, "CAM_0001.jpg")) && File.Exists(Path.Combine(unknown, "CAM_0001.DNG")),
+        "DNG 原檔照常複製，旁邊另存同名 JPG");
+    Check(cd.Converted == 1 && cd.ConvertSkipped == 1 && cd.ConvertFailed == 1 && !cd.ConvertCancelled,
+        $"轉檔摘要：轉出 {cd.Converted}、略過 {cd.ConvertSkipped}、失敗 {cd.ConvertFailed}");
+    Check(calls.Count == 2 && calls.All(c => c.Sha256.Length == 64), "有相機直出 JPG 的 DNG 不呼叫轉檔器；傳入原檔雜湊");
+    Check(rd.Items.Single(i => i.FileName == "CAM_0001.DNG").NameNote?.EndsWith("已轉出 CAM_0001.jpg（依相機顏色重建）") == true,
+        "結果清單註明轉出的檔名與方式：" + rd.Items.Single(i => i.FileName == "CAM_0001.DNG").NameNote);
+    Check(rd.Items.Single(i => i.FileName == "CAM_0002.DNG").NameNote?.Contains("相機直出") == true, "略過時註明原因");
+    Check(rd.Items.Single(i => i.FileName == "CAM_0003.DNG").NameNote?.Contains("轉檔失敗：模擬的解碼錯誤") == true
+          && !File.Exists(Path.Combine(unknown, "CAM_0003.jpg")), "轉檔失敗：註明原因、不留半成品 JPG");
+    Check(!Directory.EnumerateFiles(Staging(backupD), "*.p2d-partial", SearchOption.AllDirectories).Any(), "轉檔後沒有殘留暫存檔");
+    var againD = DedupEngine.Analyze(backupD, new[] { cam }, null, CancellationToken.None);
+    Check(againD.Count(ItemStatus.AlreadyBackedUp) == 4 && againD.Count(ItemStatus.New) == 0, "轉檔後再比對：來源全部硬碟已有，轉出的 JPG 不影響");
+
+    // 關閉轉檔：不呼叫轉檔器
+    var backupD2 = Path.Combine(work2, "硬碟D2", "照片");
+    Directory.CreateDirectory(backupD2);
+    calls.Clear();
+    var rd2 = DedupEngine.Analyze(backupD2, new[] { cam }, null, CancellationToken.None);
+    var cd2 = DedupEngine.CopyNew(rd2, null, CancellationToken.None, new NamingOptions(), fake);
+    Check(calls.Count == 0 && cd2.Converted == 0 && cd2.Copied == 4, "預設不轉檔");
+
+    // 轉檔途中取消：已複製的照片保留，剩下的 DNG 不轉，不拋例外
+    var backupD3 = Path.Combine(work2, "硬碟D3", "照片");
+    Directory.CreateDirectory(backupD3);
+    using var ctsD = new CancellationTokenSource();
+    var cancelling = new FakeConverter((_, outPath, _) =>
+    {
+        File.WriteAllBytes(outPath, MakeJpeg(null, Bytes(5_000)));
+        ctsD.Cancel();
+        return RawConvertMethod.RawOnly;
+    });
+    var rd3 = DedupEngine.Analyze(backupD3, new[] { cam }, null, CancellationToken.None);
+    var cd3 = DedupEngine.CopyNew(rd3, null, ctsD.Token, new NamingOptions { ConvertDng = true }, cancelling);
+    Check(cd3.Copied == 4 && cd3.Converted == 1 && cd3.ConvertCancelled, "轉檔途中取消：照片全部保留、只轉出 1 張");
 }
 finally
 {
@@ -736,4 +944,9 @@ sealed class SyncProgress(Action<ProgressInfo> handler) : IProgress<ProgressInfo
 sealed class SyncDoubleProgress(Action<double> report) : IProgress<double>
 {
     public void Report(double value) => report(value);
+}
+
+sealed class FakeConverter(Func<string, string, RawSourceInfo, RawConvertMethod> convert) : IRawConverter
+{
+    public RawConvertMethod Convert(string rawPath, string outPath, RawSourceInfo source) => convert(rawPath, outPath, source);
 }

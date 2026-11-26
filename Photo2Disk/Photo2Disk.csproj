@@ -23,4 +23,9 @@
     <EmbeddedResource Include="app.ico" LogicalName="Photo2Disk.app.ico" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Sdcb.LibRaw" Version="0.21.1.7" />
+    <PackageReference Include="Sdcb.LibRaw.runtime.win64" Version="0.21.1" />
+  </ItemGroup>
+
 </Project>

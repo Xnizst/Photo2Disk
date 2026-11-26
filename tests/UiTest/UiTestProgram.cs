@@ -86,6 +86,13 @@ internal static class UiTestProgram
 
                 await Settle();
                 Shot(form, Path.Combine(outDir, "1_初始.png"));
+                var settingsPrompts = new List<string>();
+                var applyBackupSettings = false;
+                form.ConfirmBackupSettings = msg =>
+                {
+                    settingsPrompts.Add(msg);
+                    return applyBackupSettings;
+                };
                 form.SetBackupFolder(backup);
                 form.AddSources(sources);
                 await Settle();
@@ -115,6 +122,40 @@ internal static class UiTestProgram
                 }
                 form.SelectFilter(0);
 
+                // 修改後檔名：保留原檔名時和原檔名相同；套用「拍攝日期@原檔名」後馬上換成預計檔名
+                var keepName = form.CellText(0, MainForm.NewNameColumn) == form.CellText(0, 1);
+                var atNaming = new NamingOptions();
+                atNaming.Apply(NamingOptions.Presets.Single(p => p.Name == "拍攝日期@原檔名"));
+                form.ApplyNaming(atNaming);
+                await Settle();
+                var newNames = Enumerable.Range(0, 3).Select(r => form.CellText(r, MainForm.NewNameColumn)).ToList();
+                var plannedOk = newNames.All(n => System.Text.RegularExpressions.Regex.IsMatch(n, @"^\d{8}@"));
+                form.HoverLocationButton(0, preview: true);
+                await Settle();
+                Shot(form, Path.Combine(outDir, "3d_修改後檔名與預覽按鈕.png"));
+                log.Add($"修改後檔名：保留原檔名時相同={keepName} 套用拍攝日期@原檔名後={string.Join("、", newNames)}");
+                if (!keepName || !plannedOk)
+                {
+                    exitCode = 1;
+                }
+
+                // 來源位置的兩個按鈕：資料夾 → 選取 zip；預覽 → zip 內的檔案解到暫存資料夾再開
+                var shell = new List<(string Verb, string Path)>();
+                form.ShellOverride = (verb, path) => shell.Add((verb, path));
+                await form.ClickLocationButtonAsync(0, preview: false);
+                await form.ClickLocationButtonAsync(0, preview: true);
+                form.ShellOverride = null;
+                var shellOk = shell.Count == 2
+                              && shell[0] == ("select", sources[0])
+                              && shell[1].Verb == "open" && File.Exists(shell[1].Path)
+                              && Path.GetFileName(shell[1].Path) == form.CellText(0, 1)
+                              && shell[1].Path.StartsWith(MainForm.PreviewRoot, StringComparison.OrdinalIgnoreCase);
+                log.Add($"來源位置按鈕={shellOk}（{string.Join(" | ", shell.Select(s => s.Verb + " " + s.Path))}）");
+                if (!shellOk)
+                {
+                    exitCode = 1;
+                }
+
                 // 搜尋：PXL 開頭的有 4 個（含重複的那個）
                 form.SetSearch("PXL");
                 await Settle();
@@ -127,7 +168,8 @@ internal static class UiTestProgram
                 form.SetChecked(0, false);
                 await Settle();
                 Shot(form, Path.Combine(outDir, "3c_取消勾選.png"));
-                var uncheckedOk = form.CopyButtonText.Contains("2") && form.SelectionText.Contains("1 張未勾選");
+                var uncheckedOk = form.CopyButtonText.Contains("2") && form.SelectionText.Contains("1 張未勾選")
+                                  && form.CellText(0, MainForm.NewNameColumn) == ""; // 未勾選不會複製，沒有修改後檔名
                 log.Add($"搜尋 PXL 列數={searchRows}（應為 4） 取消勾選後按鈕={form.CopyButtonText} 說明={form.SelectionText}");
                 form.SetChecked(0, true);
                 form.SelectFilter(0);
@@ -141,6 +183,24 @@ internal static class UiTestProgram
                 var copied = Directory.EnumerateFiles(Path.Combine(backup, DedupEngine.StagingFolderName), "*", SearchOption.AllDirectories).Count();
                 log.Add($"dpi={form.DeviceDpi} size={form.Size} compact={form.CompactLevel} copied={copied}");
                 if (copied != 3)
+                {
+                    exitCode = 1;
+                }
+
+                // 備份資料夾的設定檔：一開始沒有不問；複製後改回預設設定再選一次 → 詢問並套用；設定相同也問
+                var promptsBeforeCopy = settingsPrompts.Count;
+                form.ApplyNaming(new NamingOptions());
+                applyBackupSettings = true;
+                form.SetBackupFolder(backup);
+                var appliedOk = settingsPrompts.Count == promptsBeforeCopy + 1
+                                && settingsPrompts[^1].Contains("目前的設定：")
+                                && BackupSettingsFile.SameAs(form.CurrentNaming, atNaming);
+                applyBackupSettings = false;
+                form.SetBackupFolder(backup);
+                var sameAskedOk = settingsPrompts.Count == promptsBeforeCopy + 2 && settingsPrompts[^1].Contains("和目前的設定相同");
+                File.WriteAllText(Path.Combine(outDir, "套用設定詢問.txt"), string.Join(Environment.NewLine + "----" + Environment.NewLine, settingsPrompts));
+                log.Add($"備份資料夾設定：複製前詢問次數={promptsBeforeCopy}（應為 0） 不同時詢問並套用={appliedOk} 相同也詢問={sameAskedOk}");
+                if (promptsBeforeCopy != 0 || !appliedOk || !sameAskedOk)
                 {
                     exitCode = 1;
                 }
@@ -176,18 +236,26 @@ internal static class UiTestProgram
                     exitCode = 1;
                 }
 
-                // 檔名與資料夾視窗：預設（依拍攝年份、保留原檔名）、年份＋月份＋拍攝年月-原檔名、
-                // 自訂文字-拍攝日期-流水號、依複製日期
-                var cases = new List<(string Label, NamingOptions Options)> { ("8a_檔名規則_預設_依年份_保留原檔名", new NamingOptions()) };
+                // 更多設定視窗（分頁 0 資料夾、1 檔名、2 DNG 轉檔）：每個案例截相關的分頁，並檢查切換分頁時視窗大小不變
+                var cases = new List<(string Label, NamingOptions Options, int[] Pages)>
+                {
+                    ("8a_更多設定_預設", new NamingOptions(), new[] { 0, 1, 2 }),
+                };
                 var byMonth = new NamingOptions { Folders = FolderMode.YearMonth };
                 byMonth.Apply(NamingOptions.Presets[0]);
-                cases.Add(("8b_檔名規則_年份月份_拍攝年月-原檔名", byMonth));
+                cases.Add(("8b_更多設定_年份月份_拍攝年月-原檔名", byMonth, new[] { 0, 1 }));
                 var custom = new NamingOptions();
                 custom.Apply(NamingOptions.Presets.Single(p => p.Name == "自訂文字-拍攝日期-流水號"));
                 custom.CustomText = "日本旅遊";
-                cases.Add(("8c_檔名規則_自訂文字-日期-流水號", custom));
-                cases.Add(("8d_檔名規則_依複製日期", new NamingOptions { Folders = FolderMode.CopyDate }));
-                foreach (var (label, opts) in cases)
+                cases.Add(("8c_更多設定_自訂文字-日期-流水號", custom, new[] { 1 }));
+                cases.Add(("8d_更多設定_依複製日期", new NamingOptions { Folders = FolderMode.CopyDate }, new[] { 0 }));
+                cases.Add(("8e_更多設定_DNG轉檔開啟", new NamingOptions { ConvertDng = true }, new[] { 2 }));
+                var atName = new NamingOptions { Folders = FolderMode.YearThenMonth };
+                atName.Apply(NamingOptions.Presets.Single(p => p.Name == "拍攝日期@原檔名"));
+                cases.Add(("8f_更多設定_年份月份_拍攝日期@原檔名", atName, new[] { 0, 1 }));
+                var customSep = new NamingOptions { Enabled = true, DateFormat = "yyyy.MM.dd", Separator = "#" };
+                cases.Add(("8g_更多設定_句點日期_自訂分隔", customSep, new[] { 1 }));
+                foreach (var (label, opts, pages) in cases)
                 {
                     using var dlg = new NamingDialog(opts)
                     {
@@ -198,9 +266,45 @@ internal static class UiTestProgram
                     dlg.Show(form);
                     await Settle();
                     await Task.Delay(300); // 等撥桿動畫結束
-                    Shot(dlg, Path.Combine(outDir, label + ".png"));
+                    var firstSize = dlg.Size;
+                    foreach (var page in pages)
+                    {
+                        dlg.ShowPage(page);
+                        await Settle();
+                        Shot(dlg, Path.Combine(outDir, $"{label}_{page}{NamingDialog.PageNames[page]}.png"));
+                        if (dlg.Size != firstSize)
+                        {
+                            log.Add($"{label} 切到「{NamingDialog.PageNames[page]}」時視窗大小改變：{firstSize} → {dlg.Size}");
+                            exitCode = 1;
+                        }
+                    }
                     log.Add($"{label} size={dlg.Size} 確認視窗說明：{MainForm.FolderLine(opts)} {MainForm.NamingLine(opts)}");
                     dlg.Close();
+                }
+
+                // 預設開啟後才切到「依規則改名」（細項設定原本一開始隱藏，2026-11-26 曾因此錯位）
+                using (var dlgToggle = new NamingDialog(new NamingOptions())
+                {
+                    StartPosition = FormStartPosition.Manual,
+                    Location = Origin + new Size(20, 20),
+                    TopMost = true,
+                })
+                {
+                    dlgToggle.Show(form);
+                    await Settle();
+                    dlgToggle.ShowPage(1);
+                    await Settle();
+                    var before = dlgToggle.Size;
+                    dlgToggle.RenameToggle.Checked = true;
+                    await Settle();
+                    await Task.Delay(300);
+                    Shot(dlgToggle, Path.Combine(outDir, "8h_更多設定_開啟後切到依規則改名.png"));
+                    if (dlgToggle.Size != before)
+                    {
+                        log.Add($"切到依規則改名時視窗大小改變：{before} → {dlgToggle.Size}");
+                        exitCode = 1;
+                    }
+                    dlgToggle.Close();
                 }
 
                 // 拖動排序：拍攝日期、原檔名 → 把「原檔名」拖到最上面；再點一下勾選「流水號」
@@ -209,6 +313,8 @@ internal static class UiTestProgram
                 using (var dlg = new NamingDialog(dragOpts) { StartPosition = FormStartPosition.Manual, Location = Origin + new Size(20, 20), TopMost = true })
                 {
                     dlg.Show(form);
+                    await Settle();
+                    dlg.ShowPage(1);
                     await Settle();
                     await Task.Delay(300);
                     var list = dlg.PartsList;
